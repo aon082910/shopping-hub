@@ -30,29 +30,45 @@ releases.
 
 ---
 
-## Build the image
+## Get the image
 
-There is no published registry image, so build it on the Unraid box. Put the project
-on a share (over SMB from your desktop is easiest), then from **Tools -> Web
-Terminal** or SSH:
+The image is published, so you do not need to build anything:
 
 ```bash
-cd /mnt/user/isos/sourcehub && docker build -t sourcehub:latest .
+docker pull allornothing/shopping-hub:latest
 ```
 
-The build takes roughly 3-5 minutes, most of it pulling the Playwright base layer.
-Confirm it landed:
+It is around 4.2 GB, so give the pull a few minutes on a normal connection.
+
+<details>
+<summary>Building it yourself instead</summary>
+
+Clone the repo onto a share and build on the Unraid box:
 
 ```bash
-docker images sourcehub
+git clone https://github.com/aon082910/shopping-hub.git /mnt/user/isos/shopping-hub
 ```
+
+```bash
+cd /mnt/user/isos/shopping-hub && docker build -t allornothing/shopping-hub:latest .
+```
+
+Roughly 3-5 minutes, most of it pulling the Playwright base layer. Tagging it with
+the same name means the template and compose file work unchanged.
+
+</details>
 
 ---
 
 ## Add the container
 
-**Option A -- the template (recommended).** Copy `docker/sourcehub.xml` to
-`/boot/config/plugins/dockerMan/templates-user/my-SourceHub.xml`, then
+**Option A -- the template (recommended).** On the Unraid box:
+
+```bash
+wget -O /boot/config/plugins/dockerMan/templates-user/my-SourceHub.xml \n  https://raw.githubusercontent.com/aon082910/shopping-hub/main/docker/sourcehub.xml
+```
+
+Then
 **Docker -> Add Container** and pick **SourceHub** from the template dropdown. Every
 setting below is already filled in and described in the form.
 
@@ -61,7 +77,7 @@ setting below is already filled in and described in the form.
 | Field | Value |
 |---|---|
 | Name | `SourceHub` |
-| Repository | `sourcehub:latest` |
+| Repository | `allornothing/shopping-hub:latest` |
 | Network Type | `Bridge` |
 | Port | Container `8000` -> Host `8000` |
 | Path | Container `/config` -> Host `/mnt/user/appdata/sourcehub` (Read/Write) |
@@ -261,7 +277,7 @@ it and is regenerable by re-crawling, so exclude it if you want a small backup.
 ## Updating
 
 ```bash
-cd /mnt/user/isos/sourcehub && git pull && docker build -t sourcehub:latest .
+docker pull allornothing/shopping-hub:latest
 ```
 
 Then **Docker -> SourceHub -> Force Update**, or stop and start it.

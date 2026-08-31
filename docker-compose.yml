@@ -2,8 +2,9 @@
 # exposes the same settings through the normal Add Container UI.
 services:
   sourcehub:
-    build: .
-    image: sourcehub:latest
+    image: allornothing/shopping-hub:latest
+    # Uncomment to build from source instead of pulling:
+    # build: .
     container_name: sourcehub
     restart: unless-stopped
     ports:

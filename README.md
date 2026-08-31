@@ -14,22 +14,41 @@ Chinavasion  Global Sources  Made-in-China  GearBest  Banggood
 
 ## Quick start
 
+### Docker (easiest)
+
 ```bash
-cd "D:\AI Projects\SourceHub"
+docker run -d --name shopping-hub -p 8000:8000 --shm-size=1g \
+  -v ./appdata:/config \
+  -e SOURCEHUB_ADMIN_TOKEN=change-me \
+  allornothing/shopping-hub:latest
+```
+
+Open <http://127.0.0.1:8000>. A `docker-compose.yml` is included, and Unraid users
+have a container template plus a full guide in [UNRAID.md](UNRAID.md).
+
+`--shm-size=1g` is not optional: Docker's default 64 MB `/dev/shm` makes Chromium
+crash on heavy pages, and it fails silently -- the browser-rendered sites just
+return zero listings.
+
+### From source
+
+```bash
+git clone https://github.com/aon082910/shopping-hub.git
+cd shopping-hub
 python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-.\.venv\Scripts\python -m playwright install chromium
-copy .env.example .env
+.venv/bin/pip install -r requirements.txt          # Windows: .venv\Scripts\pip
+.venv/bin/python -m playwright install chromium
+cp .env.example .env                               # Windows: copy
 ```
 
 See the UI immediately with sample data (no network needed):
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli demo-seed
+.venv/bin/python -m sourcehub.cli demo-seed
 ```
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli serve
+.venv/bin/python -m sourcehub.cli serve
 ```
 
 Then open <http://127.0.0.1:8000>.
@@ -37,19 +56,19 @@ Then open <http://127.0.0.1:8000>.
 Check the scrapers still parse their sites before your first real crawl:
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli selftest --site aliexpress,dhgate,banggood
+.venv/bin/python -m sourcehub.cli selftest --site aliexpress,dhgate,banggood
 ```
 
 Crawl for real:
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli crawl --sites aliexpress,dhgate,banggood --keyword "usb c hub" --pages 3
+.venv/bin/python -m sourcehub.cli crawl --sites aliexpress,dhgate,banggood --keyword "usb c hub" --pages 3
 ```
 
 Run it continuously (daily full crawl + 6-hourly re-pricing):
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli schedule
+.venv/bin/python -m sourcehub.cli schedule
 ```
 
 ---
@@ -66,7 +85,7 @@ below for the full comparison:
 
 - `driver: browser` (default) — log in by hand *once*, and the cookies persist:
   ```bash
-  .\.venv\Scripts\python -m sourcehub.cli browser-login --site taobao
+  .venv/bin/python -m sourcehub.cli browser-login --site taobao
   ```
   A real Chromium window opens; log in, solve the slider, press Enter. Headless
   runs then reuse that profile. Expect to redo this every few weeks.
@@ -158,7 +177,7 @@ Set `CN_PROVIDER_PRESET` + `CN_PROVIDER_KEY` in `.env`, then verify before trust
 it:
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli provider-probe --preset otapi --site 1688 --keyword "usb hub"
+.venv/bin/python -m sourcehub.cli provider-probe --preset otapi --site 1688 --keyword "usb hub"
 ```
 
 That prints the response's top-level keys, **every array-of-objects it found** (i.e.
@@ -406,7 +425,7 @@ crawl just quietly stops finding things. So capture each site's real HTML once
 and replay it offline.
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli selftest --site dhgate --save-fixture
+.venv/bin/python -m sourcehub.cli selftest --site dhgate --save-fixture
 ```
 
 That saves `search.html`, `detail.html` and a manifest under
@@ -594,7 +613,7 @@ re-sign it with their own root CA. That root sits in the **OS** trust store, so
 browsers are happy, while Python uses `certifi` and rejects it.
 
 ```bash
-.\.venv\Scripts\python -m sourcehub.cli trust-setup
+.venv/bin/python -m sourcehub.cli trust-setup
 ```
 
 It probes a live certificate to see whether anything is actually intercepting,

@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>SourceHub</Name>
-  <Repository>sourcehub:latest</Repository>
-  <Registry/>
+  <Repository>allornothing/shopping-hub:latest</Repository>
+  <Registry>https://hub.docker.com/r/allornothing/shopping-hub</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support/>
-  <Project/>
+  <Support>https://github.com/aon082910/shopping-hub/issues</Support>
+  <Project>https://github.com/aon082910/shopping-hub</Project>
   <Overview>
 Cross-marketplace product aggregation and price comparison.
 
@@ -28,8 +28,8 @@ an unauthenticated admin panel would be exposed to your whole LAN.
   </Overview>
   <Category>Tools: Productivity:</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
-  <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/yourname/sourcehub/main/docker/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/aon082910/shopping-hub/main/docker/sourcehub.xml</TemplateURL>
+  <Icon/>
   <ExtraParams>--shm-size=1g</ExtraParams>
   <PostArgs/>
   <CPUset/>
