@@ -1,0 +1,39 @@
+# Import duty estimation -- OFF by default, and deliberately so.
+#
+# Duty depends on the HTS classification of the specific good, on origin, on trade
+# programme, and on rules that change. This project cannot pick those numbers for
+# you responsibly, so it ships with no rates and says plainly that duty is not
+# included, rather than inventing a figure that looks authoritative.
+#
+# To switch it on: look the rates up from a source you trust (the USITC HTS, a
+# customs broker, your freight forwarder), enter them below, and stamp `as_of` with
+# the date you checked. The UI shows that date next to every estimate, so a stale
+# table is visible rather than silently wrong.
+#
+# Nothing here is tax advice, and an estimate is not a customs ruling.
+
+enabled: false
+
+as_of: ""                 # e.g. "2026-08-29" -- the date YOU verified these
+source: ""                # e.g. "USITC HTS, confirmed with broker"
+
+# Applied when no category rule matches. 0.0 means "no duty assumed".
+default_rate: 0.0
+
+# Shipments valued under this are treated as duty-free. Leave null unless you have
+# confirmed the current treatment for your origin and goods -- de minimis handling
+# for China-origin shipments has changed more than once.
+de_minimis_usd: null
+
+# Category path prefix -> ad valorem rate (0.075 = 7.5%). Longest prefix wins, so a
+# leaf rule beats its parent. Paths match the browse taxonomy in db/seed.py.
+# Examples only -- these are NOT researched rates. Replace them.
+by_category: {}
+  # electronics: 0.00
+  # apparel: 0.16
+  # apparel/shoes: 0.20
+  # tools: 0.03
+
+note: >
+  Estimates only. Freight, insurance, customs brokerage, merchandise processing and
+  harbour maintenance fees are not included.

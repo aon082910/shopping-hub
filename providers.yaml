@@ -1,0 +1,278 @@
+# Provider presets for the login-gated sites (1688 / Taobao / Tmall).
+#
+#   HONESTY NOTE: the endpoint paths and field names below are written from vendor
+#   documentation, not from a live call against your account. Vendors rename fields
+#   between versions and every RapidAPI reseller invents its own shape. Do NOT
+#   assume a preset works -- verify it in one command:
+#
+#       python -m sourcehub.cli provider-probe --preset otapi --keyword "usb hub"
+#
+#   That prints the real response's top-level keys, every array-of-objects it found
+#   (i.e. candidates for `items_path`), and exactly what the mapping extracted. Fix
+#   the paths here, re-run, done. No Python changes needed.
+#
+# Placeholders available in `path`, `params`, `headers` and `body`:
+#     {keyword} {page} {id} {url} {provider} {site}      and  ${ENV_VAR}
+#
+# Field paths support:  a.b.c   a.b[0].c   a.b[].c (fan-out)
+#     and a LIST of candidates, first non-empty wins:  title: ["Title", "name"]
+
+providers:
+
+  # ---------------------------------------------------------------------------
+  # OTAPI - the API that a large share of forwarding-agent sites run on top of.
+  # Covers Taobao, Tmall, 1688 and AliExpress with keyword search AND item detail.
+  # Commercial; you get an instanceKey. This is the recommended route.
+  # ---------------------------------------------------------------------------
+  otapi:
+    base_url: "https://otapi.net/service-json"
+    auth:
+      mode: query
+      param: instanceKey
+      value_env: CN_PROVIDER_KEY
+
+    sites:
+      "1688":
+        provider_code: Alibaba1688
+        currency: CNY
+        item_url_template: "https://detail.1688.com/offer/{id}.html"
+      taobao:
+        provider_code: Taobao
+        currency: CNY
+        item_url_template: "https://item.taobao.com/item.htm?id={id}"
+      tmall:
+        provider_code: Tmall
+        currency: CNY
+        item_url_template: "https://detail.tmall.com/item.htm?id={id}"
+
+    search:
+      path: "/BatchSearchItemsFrame"
+      method: GET
+      params:
+        language: en
+        signature: ""
+        xmlParameters: >-
+          <SearchItemsParameters><ItemTitle>{keyword}</ItemTitle>
+          <Provider>{provider}</Provider></SearchItemsParameters>
+        framePosition: "{page}"
+        frameSize: "50"
+
+    detail:
+      path: "/GetItemFullInfo"
+      method: GET
+      params:
+        language: en
+        itemId: "{id}"
+        blockList: "Description,Vendor"
+
+    map:
+      items_path: ["Result.Items.Items.Content", "Result.Items.Content", "Items.Content"]
+      detail_path: ["Result.Item", "Item"]
+      item:
+        id: ["Id", "ItemId"]
+        title: ["Title", "OriginalTitle"]
+        url: ["ExternalItemUrl", "TaobaoItemUrl"]
+        price: ["Price.ConvertedPriceWithoutSign", "Price.OriginalPrice"]
+        price_text: ["Price.ConvertedPrice"]
+        currency: ["Price.CurrencyCode", "Price.OriginalCurrencyCode"]
+        moq: ["MinimumOrderQuantity", "MasterQuantity"]
+        image: ["MainPictureUrl"]
+        images: ["Pictures[].Url", "MainPictureUrl"]
+        seller: ["VendorName", "VendorDisplayName"]
+        seller_url: ["VendorScore.VendorUrl"]
+        location: ["Location.City", "Location.State"]
+        sales: ["SalesInLast30Days", "TotalSales"]
+        rating: ["VendorScore.ScoreValue"]
+        category: ["CategoryName", "PhysicalParameters.CategoryName"]
+        description: ["Description"]
+        specs:
+          list: ["Attributes", "Features"]
+          key: ["PropertyName", "Name"]
+          value: ["Value", "DisplayValue"]
+        tiers:
+          list: ["QuantityRanges", "PriceRanges"]
+          min_qty: ["MinQuantity", "MinValue"]
+          max_qty: ["MaxQuantity", "MaxValue"]
+          price: ["Price.ConvertedPriceWithoutSign", "Price.OriginalPrice"]
+
+  # ---------------------------------------------------------------------------
+  # Generic RapidAPI-style Taobao/1688 scraper. Dozens of these exist and they all
+  # differ; this is a starting skeleton. Set CN_PROVIDER_BASE_URL to the host you
+  # subscribed to and fix the paths with provider-probe.
+  # ---------------------------------------------------------------------------
+  rapidapi_generic:
+    base_url: "https://taobao-api.p.rapidapi.com"
+    auth:
+      mode: header
+      param: X-RapidAPI-Key
+      value_env: CN_PROVIDER_KEY
+      extra_headers:
+        X-RapidAPI-Host: "taobao-api.p.rapidapi.com"
+
+    sites:
+      taobao:
+        provider_code: taobao
+        currency: CNY
+        item_url_template: "https://item.taobao.com/item.htm?id={id}"
+      tmall:
+        provider_code: tmall
+        currency: CNY
+        item_url_template: "https://detail.tmall.com/item.htm?id={id}"
+      "1688":
+        provider_code: "1688"
+        currency: CNY
+        item_url_template: "https://detail.1688.com/offer/{id}.html"
+
+    search:
+      path: "/api"
+      method: GET
+      params:
+        api: item_search
+        q: "{keyword}"
+        page: "{page}"
+        lang: en
+
+    detail:
+      path: "/api"
+      method: GET
+      params:
+        api: item_detail
+        num_iid: "{id}"
+
+    map:
+      items_path: ["result.item", "items", "data.items", "result.items"]
+      detail_path: ["result.item", "item", "data"]
+      item:
+        id: ["num_iid", "item_id", "id"]
+        title: ["title", "name"]
+        url: ["detail_url", "url"]
+        price: ["price", "promotion_price", "zk_final_price"]
+        price_text: ["price_text"]
+        currency: ["currency"]
+        moq: ["min_order", "moq"]
+        image: ["pic_url", "pic", "main_image"]
+        images: ["item_imgs[].url", "images", "pic_url"]
+        seller: ["nick", "shop_title", "seller_nick"]
+        location: ["location", "area", "post_fee_area"]
+        sales: ["sales", "volume", "sold"]
+        category: ["cat_name", "category_name"]
+        description: ["desc_short", "desc"]
+        specs:
+          list: ["props_list", "props", "attributes"]
+          key: ["name", "key"]
+          value: ["value"]
+        tiers:
+          list: ["price_range", "quantity_prices"]
+          min_qty: ["begin_num", "min"]
+          max_qty: ["end_num", "max"]
+          price: ["price"]
+
+  # ---------------------------------------------------------------------------
+  # A forwarding agent's own item endpoint.
+  #
+  # IMPORTANT: agents almost always expose *item lookup only*, no keyword search --
+  # so this preset has `detail` but no `search`. It can enrich items you already
+  # discovered, but it CANNOT populate the catalog on its own. Pair it with a
+  # provider that has search, or with the browser driver for discovery.
+  #
+  # To fill this in: open the agent's "buy this link" page in your browser with
+  # DevTools > Network, paste a Taobao URL, and look at the XHR the page fires.
+  # Copy its URL into `path`, its query params into `params`, and use
+  # provider-probe to nail down the field paths.
+  # ---------------------------------------------------------------------------
+  agent_lookup:
+    base_url: "${CN_PROVIDER_BASE_URL}"
+    auth:
+      mode: none
+
+    sites:
+      taobao:
+        provider_code: taobao
+        currency: CNY
+        item_url_template: "https://item.taobao.com/item.htm?id={id}"
+      tmall:
+        provider_code: tmall
+        currency: CNY
+        item_url_template: "https://detail.tmall.com/item.htm?id={id}"
+      "1688":
+        provider_code: "1688"
+        currency: CNY
+        item_url_template: "https://detail.1688.com/offer/{id}.html"
+
+    detail:
+      path: "/product/get-sale-info"
+      method: GET
+      params:
+        url: "{url}"
+        platform: "{provider}"
+      headers:
+        Accept: "application/json, text/plain, */*"
+
+    map:
+      detail_path: ["data", "result", "item"]
+      item:
+        id: ["itemId", "id", "num_iid"]
+        title: ["itemName", "title", "name"]
+        url: ["itemUrl", "url"]
+        price: ["price", "salePrice", "minPrice"]
+        currency: ["currency"]
+        image: ["mainImgUrl", "picUrl", "image"]
+        images: ["imgList[].url", "images"]
+        seller: ["shopName", "sellerName"]
+        specs:
+          list: ["attributes", "props"]
+          key: ["name", "key"]
+          value: ["value"]
+
+  # ---------------------------------------------------------------------------
+  # Blank template. Copy, rename, fill in, probe.
+  # ---------------------------------------------------------------------------
+  custom:
+    base_url: "${CN_PROVIDER_BASE_URL}"
+    auth:
+      mode: bearer          # none | query | bearer | header
+      value_env: CN_PROVIDER_KEY
+    sites:
+      "1688":
+        currency: CNY
+        item_url_template: "https://detail.1688.com/offer/{id}.html"
+      taobao:
+        currency: CNY
+        item_url_template: "https://item.taobao.com/item.htm?id={id}"
+      tmall:
+        currency: CNY
+        item_url_template: "https://detail.tmall.com/item.htm?id={id}"
+    search:
+      path: "/search"
+      method: GET
+      params:
+        q: "{keyword}"
+        page: "{page}"
+        site: "{provider}"
+    detail:
+      path: "/item"
+      method: GET
+      params:
+        id: "{id}"
+    map:
+      items_path: "items"
+      detail_path: "item"
+      item:
+        id: "id"
+        title: "title"
+        url: "url"
+        price: "price"
+        currency: "currency"
+        moq: "moq"
+        images: "images"
+        seller: "shop_name"
+        sales: "sales"
+        specs:
+          list: "props"
+          key: "name"
+          value: "value"
+        tiers:
+          list: "tiers"
+          min_qty: "min_qty"
+          max_qty: "max_qty"
+          price: "price"

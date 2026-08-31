@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_card.html" import product_card %}
+{% block title %}{{ supplier.name }} — SourceHub{% endblock %}
+
+{% block content %}
+<nav class="crumbs"><a href="/">Home</a><span>/</span><b>Supplier</b></nav>
+
+<div class="results-head"><h1>{{ supplier.name }}</h1></div>
+
+<div class="panel">
+  <div class="idline">
+    <span><b>Marketplace</b> {{ supplier.site }}</span>
+    {% if supplier.years %}<span><b>Years active</b> {{ supplier.years }}</span>{% endif %}
+    {% if supplier.rating %}<span><b>Rating</b> ★ {{ '%.1f'|format(supplier.rating) }}</span>{% endif %}
+    {% if supplier.country %}<span><b>Ships from</b> {{ supplier.country }}</span>{% endif %}
+    <span><b>Listings</b> {{ supplier.offer_count }}</span>
+    {% if supplier.verified %}<span class="tag tag-ok">verified supplier</span>{% endif %}
+  </div>
+  {% if supplier.name_raw != supplier.name %}
+    <p class="muted small">Listed as <span lang="zh">{{ supplier.name_raw }}</span></p>
+  {% endif %}
+  {% if supplier.url %}
+    <p><a class="btn btn-sm" href="{{ supplier.url }}" target="_blank"
+          rel="noopener nofollow">Storefront &rarr;</a></p>
+  {% endif %}
+</div>
+
+<h2 class="section-head">Products from this supplier
+  <small>{{ products|length }} in the catalog</small></h2>
+{% if products %}
+<div class="grid">
+  {% for p in products %}{{ product_card(p) }}{% endfor %}
+</div>
+{% else %}
+<div class="panel"><p class="muted">No active products.</p></div>
+{% endif %}
+{% endblock %}

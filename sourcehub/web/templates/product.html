@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+{% block title %}{{ product.title }} — SourceHub{% endblock %}
+
+{% block content %}
+<nav class="crumbs">
+  <a href="/">Home</a>
+  {% for b in breadcrumbs %}<span>/</span><a href="/category/{{ b.path }}">{{ b.name }}</a>{% endfor %}
+</nav>
+
+<div class="product-top">
+  <div class="gallery">
+    {% if gallery %}
+      <img id="hero" src="{{ gallery[0].full }}" alt="{{ product.title }}">
+      {% if gallery|length > 1 %}
+      <div class="thumbs">
+        {% for g in gallery %}
+          <img src="{{ g.thumb }}" data-full="{{ g.full }}" alt="" loading="lazy">
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="noimg noimg-lg">no image</div>
+    {% endif %}
+  </div>
+
+  <div class="summary">
+    <h1>{{ product.title }}</h1>
+    <div class="idline">
+      {% if product.brand %}<span><b>Brand</b> {{ product.brand }}</span>{% endif %}
+      {% if product.model %}<span><b>Model</b> {{ product.model }}</span>{% endif %}
+      {% if product.mpn and product.mpn != product.model %}<span><b>MPN</b> {{ product.mpn }}</span>{% endif %}
+      {% if product.gtin %}<span><b>GTIN</b> {{ product.gtin }}</span>{% endif %}
+    </div>
+
+    <div class="pricebox">
+      {% if product.best_price_usd %}
+        <div class="bigprice">${{ '%.2f'|format(product.best_price_usd) }}
+          <small>lowest unit price</small></div>
+        {% if product.max_price_usd and product.max_price_usd > product.best_price_usd %}
+          <div class="spread">
+            highest listed ${{ '%.2f'|format(product.max_price_usd) }}
+            — a <b>{{ product.savings_pct }}%</b> spread across {{ product.site_count }} sites
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="bigprice muted">Price on request</div>
+      {% endif %}
+
+      {% if cheapest_landed and cheapest_landed.landed_cost_usd %}
+        <div class="landed">
+          Cheapest <b>landed cost</b> for one minimum order:
+          <b>${{ '%.2f'|format(cheapest_landed.landed_cost_usd) }}</b>
+          on {{ cheapest_landed.site_name }}
+          ({{ cheapest_landed.moq }} {{ cheapest_landed.moq_unit }}{{ '' if cheapest_landed.moq == 1 else 's' }}
+          {% if cheapest_landed.shipping_cost_usd %}+ ${{ '%.2f'|format(cheapest_landed.shipping_cost_usd) }} shipping{% endif %})
+        </div>
+      {% endif %}
+
+      <div class="summary-chips">
+        <span class="chip">{{ product.offer_count }} listings</span>
+        <span class="chip">{{ product.site_count }} marketplaces</span>
+        {% if product.min_moq %}<span class="chip">min order {{ product.min_moq }}</span>{% endif %}
+        <span class="chip chip-quiet">updated {{ product.last_seen.strftime('%Y-%m-%d') if product.last_seen }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------ price table -->
+<section>
+  <h2 class="section-head">Price by marketplace
+    <small>unit price, minimum order, and shipping as disclosed by each site</small></h2>
+
+  <div class="tablewrap">
+  <table class="table offers">
+    <thead>
+      <tr>
+        <th>Marketplace</th>
+        <th class="num">Unit price</th>
+        <th class="num">Min. order</th>
+        <th class="num">Shipping</th>
+        <th class="num">Landed cost</th>
+        <th>Seller</th>
+        <th>Order</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in offers %}
+      <tr class="{{ 'row-best' if cheapest_unit and o.id == cheapest_unit.id }}">
+        <td>
+          <div class="site-cell">
+            <b>{{ o.site_name }}</b>
+            {% if o.site_needs_agent %}<span class="tag tag-warn">agent</span>{% endif %}
+            {% if o.site_is_wholesale %}<span class="tag tag-quiet">wholesale</span>{% endif %}
+          </div>
+          <a class="offer-title" href="{{ o.url }}" target="_blank" rel="noopener nofollow">{{ o.title }}</a>
+          {% if o.was_translated %}
+            <details class="orig"><summary>original listing text</summary>
+              <span lang="zh">{{ o.title_raw }}</span></details>
+          {% endif %}
+        </td>
+
+        <td class="num">
+          {% if o.price_usd %}
+            <b>${{ '%.2f'|format(o.price_usd) }}</b>
+            {% if o.currency != 'USD' %}
+              <div class="native">{{ o.currency }} {{ '%.2f'|format(o.price_native) }}</div>
+            {% endif %}
+            {% if o.variant_count > 1 and o.price_native_max %}
+              <div class="native">to {{ '%.2f'|format(o.price_native_max) }}
+                across {{ o.variant_count }} options</div>
+            {% endif %}
+            {% if o.variants %}
+              <details class="tiers"><summary>{{ o.variants|length }} options</summary>
+                <table class="minitable">
+                  {% for v in o.variants %}
+                  <tr>
+                    <td>{{ v.name[:34] }}{% if not v.in_stock %} <i>(out)</i>{% endif %}</td>
+                    <td class="num">{% if v.price_usd %}${{ '%.2f'|format(v.price_usd) }}
+                        {% else %}&mdash;{% endif %}</td>
+                  </tr>
+                  {% endfor %}
+                </table>
+              </details>
+            {% endif %}
+            {% if o.tiers %}
+              <details class="tiers"><summary>{{ o.tiers|length }} price breaks</summary>
+                <table class="minitable">
+                  {% for t in o.tiers %}
+                  <tr><td>{{ t.min_qty }}{% if t.max_qty %}–{{ t.max_qty }}{% else %}+{% endif %}</td>
+                      <td class="num">${{ '%.2f'|format(t.price_usd) if t.price_usd else '—' }}</td></tr>
+                  {% endfor %}
+                </table>
+              </details>
+            {% endif %}
+          {% else %}
+            <span class="muted">on request</span>
+          {% endif %}
+        </td>
+
+        <td class="num">
+          {{ o.moq }} <span class="muted">{{ o.moq_unit }}{{ '' if o.moq == 1 else 's' }}</span>
+        </td>
+
+        <td class="num">
+          {% if o.shipping_free %}
+            <span class="tag tag-ok">free</span>
+          {% elif o.shipping_cost_usd is not none %}
+            ${{ '%.2f'|format(o.shipping_cost_usd) }}
+          {% else %}
+            <span class="muted">not listed</span>
+          {% endif %}
+          {% if o.shipping_from %}<div class="native">from {{ o.shipping_from }}</div>{% endif %}
+          {% if o.shipping_note %}
+            <details class="orig"><summary>details</summary>{{ o.shipping_note }}</details>
+          {% endif %}
+        </td>
+
+        <td class="num">
+          {% if o.landed_cost_usd %}
+            <b>${{ '%.2f'|format(o.landed_cost_usd) }}</b>
+            <div class="native">{{ o.moq }} × unit{% if o.shipping_cost_usd %} + ship{% endif %}{% if o.duty_usd %} + duty{% endif %}</div>
+            {% if o.duty_usd %}
+              <div class="native">duty ${{ '%.2f'|format(o.duty_usd) }}
+                ({{ '%.1f'|format(o.duty_rate * 100) }}%)</div>
+            {% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+
+        <td>
+          {% if o.seller_name %}
+            {% if o.supplier_id %}
+              <a href="/supplier/{{ o.supplier_id }}"
+                 title="Everything this supplier lists">{{ o.seller_name }}</a>
+            {% elif o.seller_url %}
+              <a href="{{ o.seller_url }}" target="_blank" rel="noopener nofollow">{{ o.seller_name }}</a>
+            {% else %}{{ o.seller_name }}{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+          <div class="native">
+            {% if o.verified %}<span class="tag tag-ok">verified</span>{% endif %}
+            {% if o.seller_years %}{{ o.seller_years }}y{% endif %}
+            {% if o.rating %}★ {{ '%.1f'|format(o.rating) }}{% endif %}
+            {% if o.orders_count %}· {{ '{:,}'.format(o.orders_count) }} sold{% endif %}
+          </div>
+          {% set t = trust.get(o.id) %}
+          {% if t and t.level != 'ok' and t.level != 'unknown' %}
+            <details class="orig">
+              <summary><span class="tag {{ 'tag-warn' if t.level == 'risk' else 'tag-quiet' }}">
+                {{ 'high risk' if t.level == 'risk' else 'check seller' }}</span></summary>
+              <ul style="margin:4px 0 0;padding-left:16px">
+                {% for reason in t.reasons %}<li>{{ reason }}</li>{% endfor %}
+              </ul>
+            </details>
+          {% elif t and t.positives %}
+            <div class="native">{{ t.positives[0] }}</div>
+          {% endif %}
+
+        </td>
+
+        <td class="order-cell">
+          {% if o.can_split %}
+          <form method="post" action="/admin/split/{{ o.id }}" style="display:inline">
+            <button class="btn btn-sm" type="submit"
+                    title="This listing is not the same product - move it out">Split</button>
+          </form>
+          {% endif %}
+          {% for a in o.agent_links %}
+            <a class="btn btn-sm {{ 'btn-primary' if a.is_direct else '' }}"
+               href="{{ a.url }}" target="_blank" rel="noopener nofollow"
+               title="{{ a.fee_note or '' }}">{{ 'Buy' if a.is_direct else a.name }}</a>
+          {% endfor %}
+          {% if o.fees_note %}
+            <details class="orig"><summary>fees</summary>{{ o.fees_note }}</details>
+          {% endif %}
+        </td>
+      </tr>
+
+      {% if o.agent_notice %}
+      <tr class="agent-row">
+        <td colspan="7">
+          <div class="notice">
+            <b>{{ o.site_name }}:</b> {{ o.agent_notice }}
+            {% if o.agent_estimate %}
+              <div class="estimate">
+                Rough all-in estimate for {{ o.moq }} unit{{ '' if o.moq == 1 else 's' }}:
+                goods ${{ '%.2f'|format(o.agent_estimate.goods) }}
+                + service ${{ '%.2f'|format(o.agent_estimate.service_fee) }}
+                + China domestic ${{ '%.2f'|format(o.agent_estimate.domestic_shipping) }}
+                + international ${{ '%.2f'|format(o.agent_estimate.international_shipping) }}
+                = <b>${{ '%.2f'|format(o.agent_estimate.total) }}</b>
+                <span class="muted">— estimate only; real freight is billed on volumetric
+                weight once the item reaches the agent's warehouse.</span>
+              </div>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ---------------------------------------------------------------- specs -->
+<!-- ------------------------------------------------------ economics -->
+{% if economics and (economics.break_evens or economics.baseline or economics.rows) %}
+<section>
+  <h2 class="section-head">What it actually costs
+    <small>landed cost at quantity &mdash; unit price alone cannot answer this</small></h2>
+
+  {% if economics.baseline %}
+  <div class="panel" style="margin-bottom:14px">
+    {% if economics.baseline.importing_wins %}
+      <b>Importing is cheaper for a single unit.</b>
+      ${{ '%.2f'|format(economics.baseline.sourcing_landed) }} from
+      {{ economics.baseline.sourcing_site }} against
+      ${{ '%.2f'|format(economics.baseline.baseline_landed) }} on
+      {{ economics.baseline.site }} (US retail) &mdash;
+      <b>{{ economics.baseline.pct }}% less</b>.
+    {% else %}
+      <b>Buying domestically is cheaper here.</b>
+      {{ economics.baseline.site }} is
+      ${{ '%.2f'|format(-economics.baseline.saving) }} less than the best import
+      option at one unit, before any customs delay or return hassle.
+    {% endif %}
+    <div class="muted small" style="margin-top:6px">
+      Excludes duty and any forwarding-agent fees. Sites that do not publish
+      shipping are counted at zero, so import costs are optimistic.
+    </div>
+  </div>
+  {% endif %}
+
+  {% if economics.break_evens %}
+  <div class="panel" style="margin-bottom:14px">
+    <b>Break-even on wholesale</b>
+    <ul style="margin:8px 0 0">
+      {% for b in economics.break_evens %}
+      <li>
+        <b>{{ b.site }}</b> (${{ '%.2f'|format(b.unit_usd) }} &times; MOQ {{ b.moq }})
+        becomes cheaper than {{ b.versus }} once you need
+        <b>{{ b.quantity }}</b> unit{{ '' if b.quantity == 1 else 's' }}
+        &mdash; saving ${{ '%.2f'|format(b.saving) }} at that quantity.
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if economics.rows %}
+  <div class="tablewrap">
+  <table class="table">
+    <thead><tr>
+      <th class="num">If you need</th><th>Cheapest source</th>
+      <th class="num">Total</th><th class="num">Per unit you wanted</th><th>Catch</th>
+    </tr></thead>
+    <tbody>
+      {% for r in economics.rows %}
+      <tr>
+        <td class="num">{{ r.qty }}</td>
+        <td>{{ r.site }}
+          {% if r.is_baseline %}<span class="tag tag-quiet">US retail</span>{% endif %}
+          {% if r.needs_agent %}<span class="tag tag-warn">agent</span>{% endif %}
+        </td>
+        <td class="num">${{ '%.2f'|format(r.landed) }}</td>
+        <td class="num">${{ '%.2f'|format(r.effective_unit) }}</td>
+        <td class="small muted">
+          {% if r.overage %}buys {{ r.overage }} more than you need{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if not duty.enabled %}
+<p class="muted small">
+  Landed costs exclude import duty and customs fees &mdash; duty estimation is not
+  configured. See <code>duty.yaml</code> to switch it on with rates you have verified.
+</p>
+{% else %}
+<p class="muted small">
+  Duty estimated from <code>duty.yaml</code>{% if duty.as_of %}, rates as of
+  {{ duty.as_of }}{% if duty.staleness_days and duty.staleness_days > 180 %}
+  <span class="tag tag-warn">{{ duty.staleness_days }} days old</span>{% endif %}{% endif %}.
+  Estimates only, not a customs ruling; brokerage and processing fees are excluded.
+</p>
+{% endif %}
+
+{% if offers|length > 1 %}
+<section>
+  <h2 class="section-head">Merge into another product
+    <small>the matcher is conservative, so real duplicates sometimes survive it</small></h2>
+  <div class="panel">
+    <form method="post" action="/admin/merge" class="imgform">
+      <input type="hidden" name="source_slug" value="{{ product.slug }}">
+      <input type="text" name="target_slug" placeholder="target product slug"
+             style="flex:1;min-width:260px">
+      <button class="btn" type="submit">Merge this product into that one</button>
+    </form>
+    <p class="muted small" style="margin-bottom:0">
+      Every listing here moves to the target and this page is removed. Admin only.
+    </p>
+  </div>
+</section>
+{% endif %}
+
+{% if product.specs %}
+<section>
+  <h2 class="section-head">Specifications
+    <small>merged from all {{ product.offer_count }} listings, translated to English</small></h2>
+  <table class="table specs">
+    <tbody>
+      {% for k, v in product.specs.items() %}
+        <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if product.description %}
+<section>
+  <h2 class="section-head">Description</h2>
+  <div class="panel prose">{{ product.description[:4000] }}</div>
+</section>
+{% endif %}
+
+{% if history|length > 1 %}
+<section>
+  <h2 class="section-head">Lowest price over time</h2>
+  <div class="panel">
+    <svg id="chart" viewBox="0 0 720 180" preserveAspectRatio="none" class="sparkline"></svg>
+    <div class="muted small" id="chart-range"></div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Gallery thumbnails
+document.querySelectorAll('.thumbs img').forEach(t => {
+  t.addEventListener('click', () => {
+    document.getElementById('hero').src = t.dataset.full;
+  });
+});
+
+// Price history sparkline (no charting library — it's one polyline).
+(function () {
+  const data = {{ history|tojson }};
+  const svg = document.getElementById('chart');
+  if (!svg || !data || data.length < 2) return;
+  const W = 720, H = 180, PAD = 8;
+  const prices = data.map(d => d.price);
+  const lo = Math.min(...prices), hi = Math.max(...prices);
+  const span = (hi - lo) || 1;
+  const pts = data.map((d, i) => {
+    const x = PAD + (i / (data.length - 1)) * (W - 2 * PAD);
+    const y = H - PAD - ((d.price - lo) / span) * (H - 2 * PAD);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  svg.innerHTML =
+    '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="2"/>';
+  document.getElementById('chart-range').textContent =
+    'low $' + lo.toFixed(2) + ' · high $' + hi.toFixed(2) +
+    ' · ' + data[0].date + ' to ' + data[data.length - 1].date;
+})();
+</script>
+{% endblock %}

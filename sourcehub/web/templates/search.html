@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% from "_card.html" import product_card %}
+{% block title %}{{ heading }} — SourceHub{% endblock %}
+
+{% block content %}
+{% if category %}
+<nav class="crumbs">
+  <a href="/">Home</a>
+  {% for a in category.ancestors %}<span>/</span><a href="/category/{{ a.path }}">{{ a.name }}</a>{% endfor %}
+  <span>/</span><b>{{ category.name }}</b>
+</nav>
+{% endif %}
+
+<div class="results-head">
+  <h1>{{ heading }}</h1>
+  <p class="muted">{{ '{:,}'.format(total) }} product{{ '' if total == 1 else 's' }}</p>
+</div>
+
+{% if category and category.children %}
+<div class="subcats">
+  {% for sub in category.children %}
+    <a class="subcat" href="/category/{{ sub.path }}">{{ sub.name }} <i>{{ sub.count }}</i></a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="layout">
+  <aside class="sidebar">
+    <form method="get" class="filters">
+      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+
+      <div class="filter-group">
+        <label>Sort</label>
+        <select name="sort" onchange="this.form.submit()">
+          <option value="relevance" {{ 'selected' if filters.sort == 'relevance' }}>Relevance</option>
+          <option value="price_asc" {{ 'selected' if filters.sort == 'price_asc' }}>Price: low to high</option>
+          <option value="price_desc" {{ 'selected' if filters.sort == 'price_desc' }}>Price: high to low</option>
+          <option value="savings"   {{ 'selected' if filters.sort == 'savings' }}>Biggest price spread</option>
+          <option value="sites"     {{ 'selected' if filters.sort == 'sites' }}>Most sites compared</option>
+          <option value="newest"    {{ 'selected' if filters.sort == 'newest' }}>Newest</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label>Marketplace</label>
+        <select name="site">
+          <option value="">Any</option>
+          {% for s in sites %}
+            <option value="{{ s.key }}" {{ 'selected' if filters.site == s.key }}>
+              {{ s.name }} ({{ s.offers }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label>Price (USD)</label>
+        <div class="row2">
+          <input type="number" step="0.01" name="min_price" placeholder="min" value="{{ filters.min_price }}">
+          <input type="number" step="0.01" name="max_price" placeholder="max" value="{{ filters.max_price }}">
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <label>Max minimum order</label>
+        <input type="number" name="max_moq" placeholder="e.g. 10" value="{{ filters.max_moq }}">
+        <small class="muted">Hides wholesale lots bigger than this.</small>
+      </div>
+
+      <div class="filter-group">
+        <label class="checkline">
+          <input type="checkbox" name="direct_only" value="1" {{ 'checked' if filters.direct_only }}>
+          Ships to US without an agent
+        </label>
+      </div>
+
+      {% if facets and facets.brands %}
+      <div class="filter-group">
+        <label>Brand</label>
+        <select name="brand">
+          <option value="">Any</option>
+          {% for b in facets.brands %}
+            <option value="{{ b.name }}" {{ 'selected' if filters.brand == b.name }}>
+              {{ b.name }} ({{ b.count }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <button class="btn" type="submit">Apply filters</button>
+      <a class="btn btn-quiet" href="{{ '/category/' + category.path if category else '/search?q=' + q }}">Reset</a>
+    </form>
+  </aside>
+
+  <div class="results">
+    {% if facets and (facets.sites or facets.prices) %}
+    <div class="facets">
+      {% if facets.prices %}
+      <div class="facetrow">
+        <span class="facetlab">Price</span>
+        {% for b in facets.prices %}
+          <a class="facet" href="?{{ 'q=' + q + '&' if q }}min_price={{ b.min or '' }}&max_price={{ b.max or '' }}{{ '&brand=' + filters.brand if filters.brand }}">{{ b.label }} <i>{{ b.count }}</i></a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if facets.sites %}
+      <div class="facetrow">
+        <span class="facetlab">Sold on</span>
+        {% for st in facets.sites %}
+          <a class="facet {{ 'facet-on' if filters.site == st.key }}"
+             href="?{{ 'q=' + q + '&' if q }}site={{ st.key }}">{{ st.name }} <i>{{ st.count }}</i></a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if products %}
+      <div class="grid">
+        {% for p in products %}{{ product_card(p) }}{% endfor %}
+      </div>
+
+      {% if pages > 1 %}
+      <nav class="pager">
+        {% set base = request.url.remove_query_params('page') %}
+        {% if page > 1 %}<a href="{{ base }}{{ '&' if '?' in base|string else '?' }}page={{ page - 1 }}">← Prev</a>{% endif %}
+        <span>Page {{ page }} of {{ pages }}</span>
+        {% if page < pages %}<a href="{{ base }}{{ '&' if '?' in base|string else '?' }}page={{ page + 1 }}">Next →</a>{% endif %}
+      </nav>
+      {% endif %}
+    {% else %}
+      <div class="panel empty-state">
+        <h2>Nothing matched</h2>
+        <p class="muted">
+          Either the filters are too tight, or the catalog hasn't been crawled for this
+          term yet. To fetch it now:
+        </p>
+        <pre><code>python -m sourcehub.cli crawl --keyword "{{ q or 'your search' }}" --pages 2</code></pre>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

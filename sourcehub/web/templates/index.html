@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_card.html" import product_card %}
+{% block title %}SourceHub — compare 11 China marketplaces{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>One product page. Every marketplace's price.</h1>
+  <p class="lede">
+    AliExpress, Alibaba, 1688, Taobao, Tmall, DHgate, Chinavasion, Global Sources,
+    Made-in-China, GearBest and Banggood — matched into single items, translated to
+    English, with minimum order quantities and disclosed shipping shown side by side.
+  </p>
+  <div class="statrow">
+    <div class="stat"><b>{{ '{:,}'.format(stats.products) }}</b><span>products</span></div>
+    <div class="stat"><b>{{ '{:,}'.format(stats.offers) }}</b><span>listings</span></div>
+    <div class="stat"><b>{{ '{:,}'.format(stats.multi_site) }}</b><span>multi-site matches</span></div>
+    <div class="stat"><b>{{ '{:,}'.format(stats.images) }}</b><span>images</span></div>
+  </div>
+</section>
+
+{% if stats.products == 0 %}
+<section class="panel empty-state">
+  <h2>The catalog is empty</h2>
+  <p>Run a crawl to populate it:</p>
+  <pre><code>python -m sourcehub.cli crawl --sites aliexpress,dhgate,banggood --keyword "usb c hub" --pages 2</code></pre>
+  <p class="muted">
+    Start with the three sites above — they need no login. 1688, Taobao and Tmall
+    require a one-time browser login first (<code>python -m sourcehub.cli browser-login --site taobao</code>).
+  </p>
+</section>
+{% endif %}
+
+<section>
+  <h2 class="section-head">Browse by category</h2>
+  <div class="catgrid">
+    {% for c in categories %}
+    <div class="catcard">
+      <a class="catcard-head" href="/category/{{ c.path }}">
+        <span class="cat-name">{{ c.name }}</span>
+        <span class="count">{{ '{:,}'.format(c.count) }}</span>
+      </a>
+      <div class="catcard-subs">
+        {% for sub in c.children %}
+          <a href="/category/{{ sub.path }}">{{ sub.name }}{% if sub.count %} <i>{{ sub.count }}</i>{% endif %}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{% if most_compared %}
+<section>
+  <h2 class="section-head">Best cross-site comparisons
+    <small>found on more than one marketplace</small></h2>
+  <div class="grid">
+    {% for p in most_compared %}{{ product_card(p) }}{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if newest %}
+<section>
+  <h2 class="section-head">Newly listed</h2>
+  <div class="grid">
+    {% for p in newest %}{{ product_card(p) }}{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2 class="section-head">Sources</h2>
+  <table class="table">
+    <thead><tr><th>Marketplace</th><th>Listings</th><th>Currency</th><th>Ordering</th></tr></thead>
+    <tbody>
+      {% for s in sites %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td class="num">{{ '{:,}'.format(s.offers) }}</td>
+        <td>{{ s.currency }}</td>
+        <td>
+          {% if s.needs_agent %}
+            <span class="tag tag-warn">forwarding agent required</span>
+          {% else %}
+            <span class="tag tag-ok">ships to US directly</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

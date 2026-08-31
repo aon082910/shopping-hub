@@ -1,0 +1,34 @@
+# --- core ---
+SQLAlchemy>=2.0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+python-dotenv>=1.0
+PyYAML>=6.0
+tenacity>=8.3
+python-slugify>=8.0
+
+# --- web / api ---
+fastapi>=0.111
+uvicorn[standard]>=0.30
+jinja2>=3.1
+python-multipart>=0.0.9
+
+# --- fetching ---
+httpx[http2]>=0.27
+truststore>=0.9         # trust the OS cert store (antivirus HTTPS scanning)
+curl_cffi>=0.7          # TLS/JA3 impersonation - needed for AliExpress/DHgate/Banggood
+selectolax>=0.3.21      # fast CSS-selector HTML parsing
+playwright>=1.44        # browser driver for Taobao/Tmall/1688 (run: playwright install chromium)
+
+# --- media / matching ---
+Pillow>=10.3
+ImageHash>=4.3
+numpy>=1.26
+rapidfuzz>=3.9
+
+# --- scheduling ---
+APScheduler>=3.10
+
+# --- translation providers (all optional, pick one in .env) ---
+anthropic>=0.30         # TRANSLATE_PROVIDER=claude   (best quality on specs)
+deep-translator>=1.11   # TRANSLATE_PROVIDER=google_free (no key, rate limited)

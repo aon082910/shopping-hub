@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SourceHub{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark">◈</span> SourceHub</a>
+
+    <form class="searchbar" action="/search" method="get" autocomplete="off">
+      <input type="search" name="q" value="{{ filters.q if filters else '' }}"
+             placeholder="Search every site at once — try &ldquo;esp32&rdquo; or &ldquo;led strip&rdquo;"
+             id="q" list="suggestions">
+      <datalist id="suggestions"></datalist>
+      <button type="submit">Search</button>
+    </form>
+
+    <nav class="topnav">
+      <div class="dropdown">
+        <button class="dropbtn" type="button">Categories ▾</button>
+        <div class="dropdown-panel">
+          {% for c in categories %}
+            <div class="dropcol">
+              <a class="dropcol-head" href="/category/{{ c.path }}">{{ c.name }}
+                <span class="count">{{ c.count }}</span></a>
+              {% for sub in c.children[:6] %}
+                <a class="dropcol-item" href="/category/{{ sub.path }}">{{ sub.name }}</a>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      <a href="/search/image" title="Find products from a photo">Image search</a>
+      <a href="/bom" title="Price a whole parts list at once">Bulk</a>
+      <a href="/admin">Admin</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer wrap">
+  <p>
+    SourceHub aggregates public listings from 11 marketplaces. Prices, MOQs and
+    shipping figures are captured as published by each site and may be stale or
+    incomplete — always confirm on the seller's page before ordering.
+  </p>
+</footer>
+
+<script>
+// Search suggestions, debounced.
+(function () {
+  const input = document.getElementById('q');
+  const list = document.getElementById('suggestions');
+  if (!input || !list) return;
+  let timer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const v = input.value.trim();
+    if (v.length < 2) return;
+    timer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/suggest?q=' + encodeURIComponent(v));
+        const d = await r.json();
+        list.innerHTML = (d.suggestions || [])
+          .map(s => '<option value="' + s.replace(/"/g, '&quot;') + '">').join('');
+      } catch (e) { /* suggestions are optional */ }
+    }, 220);
+  });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

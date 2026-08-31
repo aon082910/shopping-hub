@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Admin — SourceHub{% endblock %}
+
+{% block content %}
+<h1>Admin</h1>
+
+<div class="statrow">
+  <div class="stat"><b>{{ '{:,}'.format(stats.products) }}</b><span>products</span></div>
+  <div class="stat"><b>{{ '{:,}'.format(stats.offers) }}</b><span>listings</span></div>
+  <div class="stat"><b>{{ '{:,}'.format(stats.multi_site) }}</b><span>multi-site</span></div>
+  <div class="stat"><b>{{ '{:,}'.format(stats.pending_reviews) }}</b><span>pending reviews</span></div>
+  <div class="stat"><b>{{ '{:,}'.format(stats.rejections) }}</b><span>rejected pairs</span></div>
+</div>
+
+<section>
+  <h2 class="section-head">Match review queue
+    <small>borderline merges the matcher declined to decide on its own</small></h2>
+  {% if reviews %}
+  <div class="tablewrap">
+  <table class="table">
+    <thead><tr><th>Score</th><th>Incoming listing</th><th>Existing product</th><th>Signals</th><th></th></tr></thead>
+    <tbody>
+      {% for r in reviews %}
+      <tr>
+        <td class="num"><b>{{ r.score }}</b></td>
+        <td>
+          <div class="muted small">{{ r.offer_site }}</div>
+          <a href="{{ r.offer_url }}" target="_blank" rel="noopener nofollow">{{ r.offer_title }}</a>
+        </td>
+        <td><a href="/product/{{ r.product_slug }}">{{ r.product_title }}</a></td>
+        <td class="small">
+          {% for k, v in r.signals.items() %}<span class="chip chip-quiet">{{ k }}: {{ v }}</span>{% endfor %}
+        </td>
+        <td class="order-cell">
+          <form method="post" action="/admin/review/{{ r.id }}/approve" style="display:inline">
+            <button class="btn btn-sm btn-primary" type="submit">Merge</button></form>
+          <form method="post" action="/admin/review/{{ r.id }}/reject" style="display:inline">
+            <button class="btn btn-sm" type="submit">Keep separate</button></form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="panel"><p class="muted">Nothing pending.</p></div>
+  {% endif %}
+</section>
+
+<section>
+  <h2 class="section-head">Adapter health
+    <small>a rotted selector does not raise &mdash; it just finds nothing</small></h2>
+  {% if health_attention %}
+  <div class="panel" style="border-color:var(--warn-ink);margin-bottom:12px">
+    <b>{{ health_attention|length }} site(s) need attention.</b>
+    <ul style="margin:8px 0 0">
+      {% for r in health_attention %}
+      <li><b>{{ r.site_name }}</b> &mdash; {{ r.status }}: {{ r.detail }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  <div class="tablewrap">
+  <table class="table">
+    <thead><tr><th>Site</th><th>Status</th><th class="num">Recent</th>
+      <th class="num">Baseline</th><th class="num">Live listings</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for r in health %}
+      <tr>
+        <td>{{ r.site_name }}</td>
+        <td>
+          {% if r.status == 'ok' %}<span class="tag tag-ok">ok</span>
+          {% elif r.status in ('broken', 'blocked') %}<span class="tag tag-warn">{{ r.status }}</span>
+          {% elif r.status == 'degraded' %}<span class="tag tag-warn">degraded</span>
+          {% else %}<span class="tag tag-quiet">{{ r.status }}</span>{% endif %}
+        </td>
+        <td class="num">{{ '%.0f'|format(r.recent_avg) }}</td>
+        <td class="num">{{ '%.0f'|format(r.baseline_avg) }}</td>
+        <td class="num">{{ '{:,}'.format(r.active_offers) }}</td>
+        <td class="small muted">{{ r.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-head">Rejected pairs
+    <small>listings you ruled are not the same product &mdash; the matcher will not
+      re-propose these</small></h2>
+  {% if rejections %}
+  <div class="tablewrap">
+  <table class="table">
+    <thead><tr><th>Listing</th><th>Kept separate from</th><th>When</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rejections %}
+      <tr>
+        <td>{{ r.offer_title }}</td>
+        <td>
+          {% if r.product_slug %}
+            <a href="/product/{{ r.product_slug }}">{{ r.product_title }}</a>
+          {% else %}<span class="muted">{{ r.product_title }}</span>{% endif %}
+        </td>
+        <td class="small">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at }}</td>
+        <td class="order-cell">
+          {% if r.canonical_id %}
+          <form method="post"
+                action="/admin/unblock/{{ r.offer_id }}/{{ r.canonical_id }}"
+                style="display:inline">
+            <button class="btn btn-sm" type="submit"
+                    title="Allow the matcher to reconsider this pair">Undo</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="panel"><p class="muted">No rejections recorded.</p></div>
+  {% endif %}
+</section>
+
+<section>
+  <h2 class="section-head">Recent crawl runs</h2>
+  <div class="tablewrap">
+  <table class="table">
+    <thead><tr><th>Site</th><th>Query</th><th>Started</th><th class="num">Seen</th>
+      <th class="num">New</th><th class="num">Updated</th><th>Result</th></tr></thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td>{{ r.site_key }}</td>
+        <td>{{ r.query or r.mode }}</td>
+        <td class="small">{{ r.started_at.strftime('%Y-%m-%d %H:%M') if r.started_at }}</td>
+        <td class="num">{{ r.offers_seen }}</td>
+        <td class="num">{{ r.offers_new }}</td>
+        <td class="num">{{ r.offers_updated }}</td>
+        <td>
+          {% if r.ok %}<span class="tag tag-ok">ok</span>
+          {% elif r.ok is none %}<span class="tag tag-quiet">running</span>
+          {% else %}<span class="tag tag-warn" title="{{ r.error }}">failed</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-head">Sources</h2>
+  <table class="table">
+    <thead><tr><th>Site</th><th class="num">Listings</th><th>Ordering</th></tr></thead>
+    <tbody>
+      {% for s in sites %}
+      <tr><td>{{ s.name }}</td><td class="num">{{ '{:,}'.format(s.offers) }}</td>
+        <td>{% if s.needs_agent %}<span class="tag tag-warn">agent required</span>
+            {% else %}<span class="tag tag-ok">direct</span>{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

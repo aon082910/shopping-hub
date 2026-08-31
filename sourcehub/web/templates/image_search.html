@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_card.html" import product_card %}
+{% block title %}Search by image — SourceHub{% endblock %}
+
+{% block content %}
+<div class="results-head">
+  <h1>Search by image</h1>
+</div>
+
+<div class="panel">
+  <p class="muted" style="margin-top:0">
+    Upload a product photo and find every marketplace selling it. This works because
+    these sites overwhelmingly reuse the <em>same supplier photograph</em> across
+    resellers &mdash; so an identical image usually means an identical product.
+  </p>
+  <form method="post" action="/search/image" enctype="multipart/form-data" class="imgform">
+    <input type="file" name="file" accept="image/*">
+    <span class="muted">or</span>
+    <input type="url" name="image_url" placeholder="https://... image URL"
+           value="{{ query_image or '' }}">
+    <button class="btn btn-primary" type="submit">Search</button>
+  </form>
+  {% if error %}<p class="tag tag-warn" style="display:inline-block">{{ error }}</p>{% endif %}
+</div>
+
+{% if hits is not none %}
+  {% if hits %}
+  <h2 class="section-head">{{ hits|length }} match{{ '' if hits|length == 1 else 'es' }}
+    <small>ranked by perceptual hash distance &mdash; lower is closer</small></h2>
+  <div class="grid">
+    {% for h in hits %}
+    <div class="imghit">
+      {{ product_card(h.card) }}
+      <div class="imghit-meta">
+        <span class="tag {{ 'tag-ok' if h.distance <= 2 else ('tag-quiet' if h.distance <= 10 else 'tag-warn') }}">
+          {{ h.confidence }}
+        </span>
+        <span class="muted small">distance {{ h.distance }} &middot; {{ h.score }}%</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="muted small" style="margin-top:18px">
+    Matched via the {{ hits[0].tier }} index.
+    <b>identical image</b> = distance 0&ndash;2, almost certainly the same listing photo.
+    <b>same photo</b> = 3&ndash;10, re-encoded or lightly edited.
+    <b>visually similar</b> = beyond that; treat as a lead, not a match.
+  </p>
+  {% else %}
+  <div class="panel empty-state">
+    <h2>No visually similar products</h2>
+    <p class="muted">
+      Nothing in the catalog is close to that image. Either the product has not been
+      crawled yet, or the photo differs too much from the listing imagery
+      (different angle, heavy crop, or your own photograph rather than the seller's).
+    </p>
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

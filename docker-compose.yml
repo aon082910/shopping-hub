@@ -1,0 +1,35 @@
+# For any Docker host. On Unraid prefer the template in docker/sourcehub.xml, which
+# exposes the same settings through the normal Add Container UI.
+services:
+  sourcehub:
+    build: .
+    image: sourcehub:latest
+    container_name: sourcehub
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Database, images, browser profile and the editable YAML config.
+      - ./appdata:/config
+    environment:
+      TZ: America/New_York
+      PUID: 99
+      PGID: 100
+      SOURCEHUB_MODE: serve            # web UI + scheduler in one process
+      # Required to reach /admin from a container -- see the note in UNRAID.md.
+      SOURCEHUB_ADMIN_TOKEN: ""
+      TRANSLATE_PROVIDER: none
+      # ANTHROPIC_API_KEY: ""
+      # EBAY_CLIENT_ID: ""
+      # EBAY_CLIENT_SECRET: ""
+      # SOURCEHUB_PROXY: ""
+    # Chromium writes a lot to /dev/shm; the 64MB Docker default makes it crash on
+    # heavy pages, which shows up as random blank results from browser-rendered sites.
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=8).status==200 else 1)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 40s
+      retries: 3

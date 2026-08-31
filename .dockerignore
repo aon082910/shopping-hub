@@ -1,0 +1,10 @@
+.venv/
+data/
+tests/fixtures/
+**/__pycache__/
+*.pyc
+.git/
+.env
+*.db
+*.db-wal
+*.db-shm

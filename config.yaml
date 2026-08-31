@@ -1,0 +1,182 @@
+# SourceHub crawl configuration.
+# Edit freely -- reloaded on every crawl run, no restart needed.
+
+crawl:
+  # Global politeness. Per-site overrides below win.
+  default_delay_seconds: 2.5
+  default_concurrency: 2
+  max_pages_per_keyword: 5
+  request_timeout: 45
+  retries: 3
+
+  # Seed keywords crawled on every scheduled sweep. This is what populates the DB.
+  keywords:
+    - bluetooth earbuds
+    - usb c hub
+    - mini pc
+    - led strip light
+    - power bank 20000mah
+    - dash cam
+    - smart watch
+    - 3d printer filament
+    - soldering station
+    - security camera wifi
+
+sites:
+  aliexpress:
+    enabled: true
+    # Search ships a complete JSON blob over plain HTTP; the product page is a
+    # JS shell with no attributes in the HTML, so only detail needs a browser.
+    render_detail: browser
+    delay_seconds: 3.0
+    concurrency: 2
+    ships_from_us_warehouse: true
+
+  alibaba:
+    enabled: true
+    delay_seconds: 3.0
+    concurrency: 2
+
+  # --- the three domestic-China sites ---------------------------------------
+  # These need either a logged-in browser session or an API provider. `driver` is
+  # shorthand for a (search, detail) pair:
+  #
+  #   driver: browser    search=browser   detail=browser    (default, no API needed)
+  #   driver: provider   search=provider  detail=provider   (fully unattended)
+  #   driver: hybrid     search=browser   detail=provider   <-- usually the best
+  #
+  # Why hybrid: forwarding agents can look up an item but cannot search, and detail
+  # fetching is where nearly all the traffic goes (one gated page per *product* vs
+  # one per *results page*). Hybrid keeps discovery on the browser and moves the
+  # expensive bulk onto the API.
+  #
+  # Set CN_PROVIDER_PRESET + CN_PROVIDER_KEY in .env and verify with:
+  #     python -m sourcehub.cli provider-probe --preset otapi --site 1688
+  #
+  # Fine-grained control: `search_driver:` / `detail_driver:` override either half,
+  # `provider_preset:` overrides the preset per site, and `detail_fallback: false`
+  # stops the browser being used when a provider detail lookup comes back empty.
+  # Anything requesting the provider silently degrades to browser if it can't do it.
+  "1688":
+    enabled: true
+    driver: browser        # browser | provider | hybrid
+    delay_seconds: 6.0
+    concurrency: 1
+    needs_agent: true      # cannot ship internationally without a forwarding agent
+
+  taobao:
+    enabled: true
+    driver: browser
+    delay_seconds: 6.0
+    concurrency: 1
+    needs_agent: true
+
+  tmall:
+    enabled: true
+    driver: browser
+    delay_seconds: 6.0
+    concurrency: 1
+    needs_agent: true
+
+  dhgate:
+    enabled: true
+    delay_seconds: 2.5
+    concurrency: 2
+
+  chinavasion:
+    enabled: true      # discovery via the site's product sitemap
+    delay_seconds: 2.0
+    concurrency: 2
+
+  globalsources:
+    # Disabled: the search page is a JS shell that yields no product cards
+    # even fully rendered. It previously 'worked' only because a too-broad
+    # selector was ingesting the site navigation as products.
+    enabled: false
+    render: browser
+    delay_seconds: 3.0
+    concurrency: 1
+
+  madeinchina:
+    enabled: true
+    delay_seconds: 3.0
+    concurrency: 2
+
+  gearbest:
+    enabled: true
+    delay_seconds: 2.5
+    concurrency: 2
+
+  # US retail baseline -- answers 'is importing actually cheaper?'. Uses the
+  # free Browse API when EBAY_CLIENT_ID/SECRET are set, else the search page.
+  ebay:
+    enabled: true
+    # eBay 403s plain HTTP scraping. With EBAY_CLIENT_ID/SECRET set the API is
+    # used and this is ignored; without keys the browser fallback is the only
+    # way the adapter returns anything.
+    render: browser
+    delay_seconds: 2.0
+    concurrency: 2
+
+  # Component distributors. These publish real manufacturer part numbers, so
+  # matching uses the exact brand+MPN path rather than fuzzy titles.
+  lcsc:
+    # Disabled: LCSC's public search endpoint moved and now answers HTTP 200
+    # with an application-level 404. The adapter is correct once SEARCH_API in
+    # scrapers/components.py points at the current path -- find it in DevTools
+    # on lcsc.com/search, set it, and flip this to true.
+    enabled: false
+    delay_seconds: 2.0
+    concurrency: 2
+
+  octopart:
+    enabled: true      # needs OCTOPART_CLIENT_ID/SECRET, else skipped
+    delay_seconds: 2.0
+    concurrency: 1
+
+  tomtop:
+    # Disabled: tomtop.com resets the TLS connection on every request,
+    # including its own homepage -- a site-level block or outage, not a
+    # selector problem. The adapter is written and correct; re-enable and run
+    # `selftest --site tomtop` to see whether it has come back.
+    enabled: false
+    delay_seconds: 2.5
+    concurrency: 2
+
+  geekbuying:
+    enabled: true
+    delay_seconds: 2.5
+    concurrency: 2
+
+  banggood:
+    enabled: true
+    render: browser      # cards render server-side but prices arrive by XHR
+    delay_seconds: 2.5
+    concurrency: 2
+
+matching:
+  # Two offers merge into one canonical product when the weighted score clears this.
+  auto_merge_threshold: 0.86
+  # Between review_threshold and auto_merge_threshold they land in the review queue.
+  review_threshold: 0.70
+  weights:
+    gtin: 1.00           # exact UPC/EAN/GTIN match -> instant merge, skips everything else
+    mpn: 0.92            # brand + manufacturer part number
+    image_phash: 0.45    # perceptual hash distance on primary images
+    title: 0.35          # normalized token-set similarity
+    specs: 0.20          # overlapping spec key/value agreement
+  image_phash_max_distance: 10
+
+translation:
+  # Fields sent to the translation provider. Everything is cached by content hash,
+  # so re-crawling the same listing costs nothing.
+  fields: [title, spec_key, spec_value, description, shipping_note]
+  batch_size: 40
+  source_languages: [zh, zh-CN, zh-TW, ja, ko, ru, es, auto]
+
+schedule:
+  # APScheduler cron expressions.
+  full_crawl: "0 3 * * *"        # 03:00 daily - full keyword sweep
+  refresh_prices: "0 */6 * * *"  # every 6h - re-price known offers only
+  fx_rates: "30 2 * * *"         # daily FX refresh
+  rematch: "0 5 * * 0"           # weekly re-run of the matcher over unmatched offers

@@ -1,0 +1,48 @@
+# Freight estimation for forwarding-agent orders.
+#
+# The old agent estimate assumed a flat $12 regardless of what you were shipping,
+# which is wrong in both directions: a phone case does not cost $12 to send, and a
+# 5kg toolkit costs far more. International parcels are billed on VOLUMETRIC weight
+# -- the greater of actual weight and (L x W x H / divisor) -- so a light bulky item
+# is charged as if it were heavy.
+#
+# These are estimates, not quotes. Real cost depends on the courier, the lane, fuel
+# surcharges and your agent's contract rates, none of which a listing page can tell
+# you. Adjust the rates below to match what your agent actually charges you.
+
+enabled: true
+
+as_of: ""                  # the date you last checked these rates against a real invoice
+
+# cm^3 per kg. 5000 is the usual air-express convention; some economy services
+# use 6000, which makes bulky items cheaper.
+volumetric_divisor: 5000
+
+base_fee_usd: 4.0          # handling / packaging, charged once per parcel
+per_kg_usd: 9.0            # per chargeable kg
+min_usd: 6.0               # nobody ships anything for less than this
+
+# Fallback shipping weights in kg, used when a listing publishes no weight at all.
+# Longest matching category prefix wins. Deliberately coarse -- a guess that is
+# clearly a guess beats a precise-looking lie, and the UI marks these as guessed.
+category_weights:
+  electronics/earbuds-headphones: 0.15
+  electronics: 0.4
+  computers/usb-hubs-docks: 0.2
+  computers: 0.6
+  components: 0.2
+  lighting: 0.5
+  tools: 1.5
+  home: 1.0
+  auto: 1.2
+  apparel: 0.4
+  beauty: 0.3
+  sports: 1.0
+  toys: 0.6
+  packaging: 0.8
+  security: 0.5
+  health: 0.5
+
+note: >
+  Estimates only. Customs duty, brokerage and any agent service fee are accounted
+  for separately; fuel surcharges and remote-area fees are not included at all.

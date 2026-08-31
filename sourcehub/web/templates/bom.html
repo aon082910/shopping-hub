@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Bulk sourcing — SourceHub{% endblock %}
+
+{% block content %}
+<div class="results-head"><h1>Bulk sourcing</h1></div>
+
+<div class="panel">
+  <p class="muted" style="margin-top:0">
+    Paste a parts list and get the cheapest source for each line. One item per line;
+    quantity optional and either side &mdash; <code>esp32 devkit x10</code>,
+    <code>10 x esp32 devkit</code> or <code>esp32 devkit, 10</code> all work.
+  </p>
+  <form method="post" action="/bom">
+    <textarea name="lines" rows="8" class="bomtext"
+      placeholder="usb c hub x5&#10;power bank 20000mah, 2&#10;3 x dash cam">{{ raw_text }}</textarea>
+    <div class="bomctl">
+      <label class="checkline">
+        <input type="checkbox" name="direct_only" value="1" {{ 'checked' if direct_only }}>
+        Only sites that ship to the US without an agent
+      </label>
+      <button class="btn btn-primary" type="submit">Price it</button>
+      {% if result %}
+      <button class="btn" type="submit" name="fmt" value="csv">Download CSV</button>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{% if result %}
+<h2 class="section-head">Result
+  <small>cheapest <b>landed</b> cost per line &mdash; unit price &times; order quantity, plus shipping</small></h2>
+
+<div class="statrow">
+  <div class="stat"><b>${{ '%.2f'|format(result.total_usd) }}</b><span>total</span></div>
+  <div class="stat"><b>{{ result.matched_lines }}/{{ result.lines|length }}</b><span>lines sourced</span></div>
+  {% if result.agent_lines %}
+  <div class="stat"><b>{{ result.agent_lines }}</b><span>need an agent</span></div>{% endif %}
+  {% if result.undisclosed_shipping %}
+  <div class="stat"><b>{{ result.undisclosed_shipping }}</b><span>shipping not listed</span></div>{% endif %}
+</div>
+
+<div class="tablewrap">
+<table class="table">
+  <thead><tr>
+    <th>Line</th><th class="num">Need</th><th class="num">Order</th>
+    <th>Best source</th><th class="num">Unit</th><th class="num">MOQ</th>
+    <th class="num">Ship</th><th class="num">Line total</th>
+  </tr></thead>
+  <tbody>
+    {% for ln in result.lines %}
+    <tr class="{{ '' if ln.matched else 'row-miss' }}">
+      <td>
+        <b>{{ ln.query }}</b>
+        {% if ln.note %}<div class="native">{{ ln.note }}</div>{% endif %}
+      </td>
+      <td class="num">{{ ln.qty }}</td>
+      <td class="num">
+        {% if ln.matched %}{{ ln.order_qty }}
+          {% if ln.overage %}<div class="native">+{{ ln.overage }} forced</div>{% endif %}
+        {% else %}&mdash;{% endif %}
+      </td>
+      <td>
+        {% if ln.matched %}
+          <a href="/product/{{ ln.product.slug }}">{{ ln.product.title_en[:60] }}</a>
+          <div class="native">{{ ln.site_name }}
+            {% if ln.needs_agent %}<span class="tag tag-warn">agent</span>{% endif %}</div>
+        {% else %}<span class="muted">not found in the catalog</span>{% endif %}
+      </td>
+      <td class="num">{% if ln.unit_usd %}${{ '%.2f'|format(ln.unit_usd) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num">{% if ln.matched %}{{ ln.moq }}{% else %}&mdash;{% endif %}</td>
+      <td class="num">
+        {% if ln.shipping_usd is not none %}${{ '%.2f'|format(ln.shipping_usd) }}
+        {% elif ln.matched %}<span class="muted">n/l</span>
+        {% else %}&mdash;{% endif %}
+      </td>
+      <td class="num">
+        {% if ln.line_total_usd %}<b>${{ '%.2f'|format(ln.line_total_usd) }}</b>
+        {% else %}&mdash;{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    <tr><td colspan="7" class="num"><b>Total</b></td>
+        <td class="num"><b>${{ '%.2f'|format(result.total_usd) }}</b></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p class="muted small" style="margin-top:14px">
+  Totals use landed cost, never unit price &mdash; a line at $0.90 with MOQ 500 is a
+  $450 commitment. Where a line needs fewer units than the minimum order, the forced
+  overage is shown rather than hidden.
+  {% if result.undisclosed_shipping %}
+  <b>{{ result.undisclosed_shipping }}</b> line(s) come from sites that do not publish
+  shipping before checkout, so the real total is higher than shown.{% endif %}
+  {% if result.agent_lines %}
+  <b>{{ result.agent_lines }}</b> line(s) are domestic-China listings: add forwarding
+  agent fees and international freight.{% endif %}
+</p>
+{% endif %}
+{% endblock %}
