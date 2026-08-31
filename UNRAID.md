@@ -70,7 +70,7 @@ The manual routes are below for anyone not using CA.
 
 ```bash
 wget -O /boot/config/plugins/dockerMan/templates-user/my-shopping-hub.xml \
-  https://raw.githubusercontent.com/aon082910/shopping-hub/main/templates/shopping-hub.xml
+  https://raw.githubusercontent.com/aon082910/Unraid-CA/main/Shopping-Hub/shopping-hub.xml
 ```
 
 Then

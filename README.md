@@ -17,7 +17,8 @@ Chinavasion  Global Sources  Made-in-China  GearBest  Banggood
 ### Unraid (easiest)
 
 Open the **Apps** tab, search **shopping-hub**, hit Install. Set an admin token and
-leave `--shm-size=1g` in Extra Parameters. Full walkthrough in [UNRAID.md](UNRAID.md).
+leave `--shm-size=1g` in Extra Parameters. Full walkthrough in [UNRAID.md](UNRAID.md); the container template lives in
+[aon082910/Unraid-CA](https://github.com/aon082910/Unraid-CA).
 
 ### Docker
 
