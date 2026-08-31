@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>
+Self-hosted tooling for people who buy from overseas marketplaces.
+
+**Shopping Hub** crawls AliExpress, Alibaba, DHgate, Banggood, Made-in-China,
+Geekbuying, Chinavasion and eBay, works out which listings are the *same physical
+product*, and gives you one page per product with every site's price, minimum order
+quantity and disclosed shipping - translated to English.
+
+It compares on **landed cost** (unit price x MOQ + freight + duty) rather than sticker
+price, because the cheapest unit price routinely belongs to the most expensive order.
+A US retail baseline from eBay is included so it can tell you when importing is not
+actually worth it.
+
+Issues and questions are handled on GitHub.
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/aon082910/shopping-hub/main/icon.png</Icon>
+  <WebPage>https://github.com/aon082910/shopping-hub</WebPage>
+</CommunityApplications>

@@ -62,14 +62,19 @@ the same name means the template and compose file work unchanged.
 
 ## Add the container
 
+**Easiest: Community Applications.** Open the **Apps** tab and search for
+**shopping-hub**. Everything below is already filled in; just set the admin token.
+The manual routes are below for anyone not using CA.
+
 **Option A -- the template (recommended).** On the Unraid box:
 
 ```bash
-wget -O /boot/config/plugins/dockerMan/templates-user/my-SourceHub.xml \n  https://raw.githubusercontent.com/aon082910/shopping-hub/main/docker/sourcehub.xml
+wget -O /boot/config/plugins/dockerMan/templates-user/my-shopping-hub.xml \
+  https://raw.githubusercontent.com/aon082910/shopping-hub/main/templates/shopping-hub.xml
 ```
 
 Then
-**Docker -> Add Container** and pick **SourceHub** from the template dropdown. Every
+**Docker -> Add Container** and pick **shopping-hub** from the template dropdown. Every
 setting below is already filled in and described in the form.
 
 **Option B -- by hand.** Docker -> Add Container, then:

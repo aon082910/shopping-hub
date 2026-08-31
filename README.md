@@ -14,7 +14,12 @@ Chinavasion  Global Sources  Made-in-China  GearBest  Banggood
 
 ## Quick start
 
-### Docker (easiest)
+### Unraid (easiest)
+
+Open the **Apps** tab, search **shopping-hub**, hit Install. Set an admin token and
+leave `--shm-size=1g` in Extra Parameters. Full walkthrough in [UNRAID.md](UNRAID.md).
+
+### Docker
 
 ```bash
 docker run -d --name shopping-hub -p 8000:8000 --shm-size=1g \
@@ -680,3 +685,14 @@ needing a forwarding agent. `--restock` fires on availability instead of price.
 `--webhook` POSTs to any Slack/Discord/Teams-compatible URL. Checked automatically
 after every crawl, not on a separate schedule — an alert six hours late on a sold-out
 listing is worthless.
+
+---
+
+## License
+
+MIT - see [LICENSE](LICENSE).
+
+One caveat that no license covers: this crawls marketplaces in ways that very
+likely breach their terms of service. Robots.txt handling is off by default and
+the rate limiter is deliberately slow. Check each site's terms and decide for
+yourself before pointing it at anything.
