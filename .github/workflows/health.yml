@@ -1,0 +1,60 @@
+name: adapter health
+
+# These sites change their markup without notice; that is this project's main
+# failure mode. This makes the project tell you it broke, instead of you finding
+# out mid-crawl.
+on:
+  schedule:
+    - cron: "0 7 * * 1"        # Mondays 07:00 UTC
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner to use. A self-hosted runner on a residential line gives trustworthy results; GitHub runners are frequently IP-blocked."
+        default: "ubuntu-latest"
+        type: string
+      sites:
+        description: "Comma-separated adapters, or blank for all"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health:
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+
+      - id: check
+        continue-on-error: true
+        run: python .github/scripts/ci_health.py "${{ inputs.sites }}"
+
+      - name: Open an issue when adapters look genuinely broken
+        if: steps.check.outputs.verdict == 'broken'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILING: ${{ steps.check.outputs.failing }}
+        run: |
+          title="Adapters failing: $FAILING"
+          # Reuse the open issue if one already exists, so a long outage does not
+          # produce one issue per week.
+          existing=$(gh issue list --state open --label adapter-health --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -1)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing as of $(date -u +%Y-%m-%d). See run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            gh issue create --title "$title" --label adapter-health \
+              --body "$(printf 'Weekly health check found these adapters returning zero listings while others succeeded from the same IP, which points at changed site markup rather than an IP block.\n\nFailing: %s\n\nReproduce:\n\n    python -m sourcehub.cli selftest --site %s\n\nRun: %s/%s/actions/runs/%s\n' "$FAILING" "$FAILING" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+          fi
+
+      - name: Fail the run if adapters are broken
+        if: steps.check.outputs.verdict == 'broken'
+        run: exit 1

@@ -1,0 +1,54 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # The adapter suite needs Chromium only when a fixture is missing; it skips
+      # those cases on its own, so we deliberately do not install browsers here.
+      # Keeping CI browserless means a test that quietly starts hitting the network
+      # fails loudly instead of passing slowly.
+      - name: Run test suites
+        run: |
+          fail=0
+          for t in tests/test_*.py; do
+            echo "::group::$t"
+            if python "$t"; then echo "ok $t"; else echo "::error::$t failed"; fail=1; fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Config files parse
+        run: |
+          python - <<'PY'
+          import yaml, glob, sys
+          for f in glob.glob("*.yaml"):
+              yaml.safe_load(open(f, encoding="utf-8"))
+              print("ok", f)
+          PY
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: shopping-hub:ci

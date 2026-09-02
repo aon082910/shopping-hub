@@ -1,16 +1,16 @@
 # SourceHub -- container image for Unraid / any Docker host.
 #
-# Built on Microsoft's Playwright image rather than python:slim. Four of the working
-# adapters (Banggood, eBay, AliExpress detail, Chinavasion) need a real Chromium to
-# run the page's JavaScript, and Chromium pulls in ~90 system libraries. Installing
-# those onto a slim base by hand is a long, brittle apt incantation that breaks on
+# Built on Microsoft's Playwright image rather than python:slim. Six of the enabled
+# adapters need a real Chromium to run the page's JavaScript -- eBay, Banggood and
+# AliExpress detail pages, plus 1688/Taobao/Tmall -- and Chromium pulls in ~90 system
+# libraries. Installing those onto a slim base by hand is a long, brittle apt incantation that breaks on
 # every Debian point release; this image is maintained by the Playwright team and
 # already matches the browser build the Python package expects.
 FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
 
-LABEL org.opencontainers.image.title="SourceHub" \
+LABEL org.opencontainers.image.title="Shopping Hub" \
       org.opencontainers.image.description="Cross-marketplace product aggregation and price comparison" \
-      org.opencontainers.image.source="https://github.com/yourname/sourcehub"
+      org.opencontainers.image.source="https://github.com/aon082910/shopping-hub"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
