@@ -1,0 +1,63 @@
+# Shopping Hub -- slim image, no bundled browser.
+#
+# 1.32GB on disk against 4.2GB, and 0.31GB against 1.17GB to pull -- about 3x
+# smaller, because it omits Chromium. That costs you the
+# six adapters that need JavaScript rendering: eBay, Banggood, AliExpress detail
+# pages (search still works), and 1688/Taobao/Tmall.
+#
+# What still works: Alibaba, DHgate, Chinavasion, Made-in-China, GearBest,
+# Geekbuying, Octopart, and AliExpress search. Matching, landed-cost comparison,
+# search, categories and image search are all unaffected.
+#
+# Worth knowing before choosing this: losing eBay also loses the US retail baseline,
+# and with it the break-even comparison against buying domestically.
+FROM python:3.12-slim-bookworm
+
+LABEL org.opencontainers.image.title="Shopping Hub (slim)" \
+      org.opencontainers.image.description="Cross-marketplace product aggregation and price comparison (no browser; HTTP-only adapters)" \
+      org.opencontainers.image.source="https://github.com/aon082910/shopping-hub"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    # Everything mutable lives under /config, which is the volume Unraid maps to
+    # appdata. Nothing the app writes should land inside the image.
+    SOURCEHUB_CONFIG_DIR=/config \
+    SOURCEHUB_DB_URL=sqlite:////config/db/sourcehub.db \
+    SOURCEHUB_MEDIA_DIR=/config/media \
+    SOURCEHUB_BROWSER_PROFILE=/config/browser_profile \
+    SOURCEHUB_HEADLESS=true \
+    SOURCEHUB_MODE=serve \
+    SOURCEHUB_PORT=8000 \
+    PUID=99 \
+    PGID=100 \
+    UMASK=022 \
+    TZ=Etc/UTC
+
+WORKDIR /app
+
+# Dependencies first so a source edit does not invalidate the pip layer.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libffi-dev tzdata ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+# playwright the package still installs (it is imported at module scope); we simply
+# never download a browser, which is where the gigabytes actually are.
+RUN pip install --no-cache-dir -r requirements.txt
+COPY sourcehub/ ./sourcehub/
+COPY config.yaml providers.yaml duty.yaml freight.yaml ./
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# The defaults are copied into /config on first start (see entrypoint), so keep a
+# pristine copy inside the image to seed from and to diff against after upgrades.
+RUN mkdir -p /defaults \
+    && cp config.yaml providers.yaml duty.yaml freight.yaml /defaults/
+
+EXPOSE 8000
+VOLUME ["/config"]
+
+HEALTHCHECK --interval=60s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request,os,sys; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('SOURCEHUB_PORT','8000')+'/healthz', timeout=8).status==200 else 1)"
+
+ENTRYPOINT ["/entrypoint.sh"]

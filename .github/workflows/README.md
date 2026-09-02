@@ -4,7 +4,7 @@
 |---|---|---|
 | `tests.yml` | push, PR | Runs the 13 test suites and builds the image without pushing |
 | `health.yml` | Mondays, manual | Runs `selftest` against live sites and opens an issue when an adapter looks genuinely broken |
-| `release.yml` | tag `v*`, manual | Builds and pushes the image to Docker Hub, then cuts a GitHub release |
+| `release.yml` | tag `v*`, manual | Builds and pushes both images (`latest` and `slim`) to Docker Hub, then cuts a GitHub release |
 
 ## One-time setup for releases
 

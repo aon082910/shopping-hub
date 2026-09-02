@@ -91,7 +91,23 @@ class BrowserSession:
         if self.proxy:
             launch_kwargs["proxy"] = {"server": self.proxy}
 
-        self._ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
+        try:
+            self._ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
+        except Exception as e:
+            # The slim image ships the playwright package but no browser binary, so
+            # the import above succeeds and only the launch fails. Left raw, that
+            # surfaces as an opaque Playwright error that callers swallow into
+            # "0 listings" -- indistinguishable from a site changing its markup.
+            msg = str(e)
+            if "Executable doesn't exist" in msg or "playwright install" in msg:
+                raise BrowserUnavailable(
+                    "Chromium is not installed in this environment, and this site "
+                    "needs it to render its listings.\n"
+                    "  Slim image: use the full image (allornothing/shopping-hub:latest), "
+                    "or set render: http for this site in config.yaml.\n"
+                    "  Local checkout: python -m playwright install chromium"
+                ) from e
+            raise
         self._ctx.add_init_script(STEALTH_JS)
         # Images/fonts/media are dead weight for scraping; we fetch product images
         # separately over plain HTTP. Cuts page time roughly in half.

@@ -58,6 +58,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build and push slim (no bundled browser)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.slim
+          platforms: linux/amd64
+          push: true
+          tags: |
+            allornothing/shopping-hub:slim
+            allornothing/shopping-hub:${{ steps.v.outputs.version }}-slim
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

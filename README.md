@@ -32,6 +32,19 @@ docker run -d --name shopping-hub -p 8000:8000 --shm-size=1g \
 Open <http://127.0.0.1:8000>. A `docker-compose.yml` is included, and Unraid users
 have a container template plus a full guide in [UNRAID.md](UNRAID.md).
 
+Two image tags are published:
+
+| Tag | Pull | On disk | Adapters |
+|---|---|---|---|
+| `latest` | 1.17 GB | 4.2 GB | all 13 |
+| `slim` | 0.31 GB | 1.32 GB | 7 - no bundled browser |
+
+`slim` drops Chromium, and with it eBay, Banggood, AliExpress detail pages and
+1688/Taobao/Tmall. Alibaba, DHgate, Chinavasion, Made-in-China, GearBest, Geekbuying
+and AliExpress *search* still work. Worth knowing: losing eBay also loses the US
+retail baseline, so break-even against buying domestically goes with it. Sites that
+need a browser log a clear error on `slim` rather than silently returning nothing.
+
 `--shm-size=1g` is not optional: Docker's default 64 MB `/dev/shm` makes Chromium
 crash on heavy pages, and it fails silently -- the browser-rendered sites just
 return zero listings.
