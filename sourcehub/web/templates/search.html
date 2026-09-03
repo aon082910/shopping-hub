@@ -16,6 +16,26 @@
   <p class="muted">{{ '{:,}'.format(total) }} product{{ '' if total == 1 else 's' }}</p>
 </div>
 
+{% if live in ("queued", "pending") %}
+<div class="live-crawl" id="live-crawl" data-q="{{ q }}" data-total="{{ total }}">
+  <span class="spinner" aria-hidden="true"></span>
+  <div>
+    <b>Searching the marketplaces for &ldquo;{{ q }}&rdquo;&hellip;</b>
+    <span class="muted">Nothing local matched, so the sites are being crawled now.
+    This takes a minute or two. Results appear here on their own.</span>
+  </div>
+</div>
+{% elif live == "cooldown" and total == 0 %}
+<div class="live-crawl muted">
+  These sites were already crawled for &ldquo;{{ q }}&rdquo; recently and nothing came
+  back. Try different wording, or widen the crawl in <code>config.yaml</code>.
+</div>
+{% elif live == "busy" %}
+<div class="live-crawl muted">
+  The crawl queue is full right now &mdash; this search was not queued. Try again shortly.
+</div>
+{% endif %}
+
 {% if category and category.children %}
 <div class="subcats">
   {% for sub in category.children %}
@@ -138,4 +158,39 @@
     {% endif %}
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if live in ("queued", "pending") %}
+<script>
+// Poll while a background crawl runs. Reload only when the result count actually
+// changes, so a crawl that finds nothing does not bounce the page for no reason.
+(function () {
+  var el = document.getElementById("live-crawl");
+  if (!el) return;
+  var q = el.dataset.q, before = parseInt(el.dataset.total || "0", 10);
+  var tries = 0, MAX = 60;               // ~5 minutes at 5s
+  var timer = setInterval(function () {
+    if (++tries > MAX) { clearInterval(timer); return; }
+    fetch("/api/search/status?q=" + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.total > before) { clearInterval(timer); location.reload(); return; }
+        if (!s.active) {
+          clearInterval(timer);
+          var m = el.querySelector(".muted");
+          if (m) {
+            m.textContent = s.total > before
+              ? "Done."
+              : "Finished, but nothing new was found for this search.";
+          }
+          var sp = el.querySelector(".spinner");
+          if (sp) sp.remove();
+        }
+      })
+      .catch(function () { clearInterval(timer); });
+  }, 5000);
+})();
+</script>
+{% endif %}
 {% endblock %}

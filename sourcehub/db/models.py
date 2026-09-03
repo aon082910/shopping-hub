@@ -529,6 +529,38 @@ class CrawlRun(Base):
     error: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class SearchDemand(Base):
+    """A keyword someone searched for, and what we did about it.
+
+    Persisted rather than kept in memory because the cooldown is the only thing
+    standing between "search triggers a crawl" and "every page refresh hammers
+    eleven marketplaces". A restart must not reset it.
+    """
+
+    __tablename__ = "search_demand"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Normalised (casefolded, whitespace collapsed) so "USB Hub" and "usb  hub"
+    # share one cooldown.
+    keyword: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    display: Mapped[str] = mapped_column(String(255))
+
+    first_requested: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    last_requested: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    request_count: Mapped[int] = mapped_column(Integer, default=1)
+
+    last_crawled: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True))
+    crawl_count: Mapped[int] = mapped_column(Integer, default=0)
+    # queued | running | done | failed
+    last_status: Mapped[Optional[str]] = mapped_column(String(16))
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    offers_found: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class Watch(Base, TimestampMixin):
     """A price the user is waiting for.
 

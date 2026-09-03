@@ -665,6 +665,36 @@ def cmd_prune(args) -> int:
     return 0
 
 
+def cmd_demand(args) -> int:
+    """What people searched for, and whether crawling it found anything.
+
+    This is the feedback loop for tuning live_search: keywords with many requests
+    and zero results are either bad queries or adapters that need attention.
+    """
+    from .db.models import SearchDemand
+
+    init_db()
+    with session_scope() as session:
+        q = session.query(SearchDemand)
+        if args.failed:
+            q = q.filter(SearchDemand.offers_found == 0)
+        rows = q.order_by(SearchDemand.request_count.desc()).limit(args.limit).all()
+
+        if not rows:
+            print("No searches recorded yet.")
+            return 0
+
+        print(f"{'keyword':<34}{'asked':>6}{'crawls':>7}{'found':>7}  {'status':<8}last crawled")
+        print("-" * 88)
+        for r in rows:
+            when = r.last_crawled.strftime("%Y-%m-%d %H:%M") if r.last_crawled else "never"
+            print(f"{r.display[:33]:<34}{r.request_count:>6}{r.crawl_count:>7}"
+                  f"{r.offers_found:>7}  {(r.last_status or '-'):<8}{when}")
+            if r.last_error:
+                print(f"{'':<34}error: {r.last_error[:60]}")
+    return 0
+
+
 def cmd_stats(args) -> int:
     with session_scope() as session:
         products = session.scalar(select(func.count(CanonicalProduct.id))) or 0
@@ -814,6 +844,11 @@ def build_parser() -> argparse.ArgumentParser:
     pr = sub.add_parser("prune", help="deactivate listings that have disappeared")
     pr.add_argument("--days", type=int, default=30)
     pr.set_defaults(func=cmd_prune)
+
+    dm = sub.add_parser("demand", help="keywords people searched for")
+    dm.add_argument("--limit", type=int, default=30)
+    dm.add_argument("--failed", action="store_true", help="only those that found nothing")
+    dm.set_defaults(func=cmd_demand)
 
     sub.add_parser("stats", help="catalog summary").set_defaults(func=cmd_stats)
     return p

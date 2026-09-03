@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..agents import agent_notice, build_agent_links, estimate_agent_total
 from ..config import get_settings
 from ..duty import load_duty_table
+from ..pipeline.ondemand import crawl_status, request_crawl
 from ..pipeline.breakeven import analyse
 from ..pipeline.freight import from_specs as spec_freight
 from ..pipeline.trust import assess_offers
@@ -488,11 +489,15 @@ def search_page(
         page=page,
     )
     facets = compute_facets(session, [p.id for p in products])
+    # Thin results are the signal that nobody has crawled this yet. Ask for a
+    # crawl; it runs in the background and this response does not wait for it.
+    live = request_crawl(q, local_results=total) if q else None
     return templates.TemplateResponse(
         request,
         "search.html",
         {
             "q": q,
+            "live": live,
             "products": [product_card(session, p) for p in products],
             "total": total,
             "page": page,
@@ -1147,8 +1152,10 @@ def api_search(
         sort=f["sort"],
         page=page,
     )
+    live = request_crawl(q, local_results=total) if q else None
     return {
         "query": q,
+        "live": live,
         "total": total,
         "page": page,
         "page_size": PAGE_SIZE,
@@ -1190,6 +1197,20 @@ def api_product(slug: str, session: Session = Depends(db)):
 @app.get("/api/categories")
 def api_categories(session: Session = Depends(db)):
     return {"categories": category_tree(session)}
+
+
+@app.get("/api/search/status")
+def api_search_status(q: str = "", session: Session = Depends(db)):
+    """Progress of a background crawl, so the results page can refresh itself.
+
+    Returns `total` alongside the crawl state: the page compares it against what
+    it already rendered and only reloads when the number actually moved, so a
+    crawl that finds nothing does not cause a pointless refresh.
+    """
+    status = crawl_status(q) if q else {"state": None, "active": False}
+    _, total = query_products(session, q=q, page=1)
+    status["total"] = total
+    return status
 
 
 @app.get("/api/stats")

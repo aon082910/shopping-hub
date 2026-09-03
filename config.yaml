@@ -180,3 +180,30 @@ schedule:
   refresh_prices: "0 */6 * * *"  # every 6h - re-price known offers only
   fx_rates: "30 2 * * *"         # daily FX refresh
   rematch: "0 5 * * 0"           # weekly re-run of the matcher over unmatched offers
+
+# --------------------------------------------------------------- live search
+# Searching for something nobody has crawled yet kicks off a crawl for it, in the
+# background. The search itself never waits.
+#
+# The defaults are deliberately timid, because this wires a public input box to
+# eleven marketplaces. Raise them only if you have a proxy and know what your
+# rate limits are.
+live_search:
+  enabled: true
+  # Only crawl when the catalogue has fewer than this many local matches. A query
+  # that already has good answers should not touch the network.
+  min_results: 5
+  # Do not crawl the same keyword again within this many hours, however many
+  # times it is searched. Survives restarts.
+  cooldown_hours: 24
+  # Shallow on purpose: results should appear in a minute, not twenty. The
+  # scheduled full crawl deepens whatever proves popular.
+  max_pages: 1
+  fetch_details: false
+  # Ignore very short queries; "us" is not worth eleven site hits.
+  min_chars: 3
+  # Reject new work past this queue depth rather than growing unboundedly.
+  max_queue: 20
+  # Which sites to hit on demand. Empty means every enabled site. Narrowing this
+  # to the fast HTTP-only adapters makes results appear sooner.
+  sites: []

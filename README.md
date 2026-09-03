@@ -710,3 +710,41 @@ One caveat that no license covers: this crawls marketplaces in ways that very
 likely breach their terms of service. Robots.txt handling is off by default and
 the rate limiter is deliberately slow. Check each site's terms and decide for
 yourself before pointing it at anything.
+
+---
+
+## Live search
+
+Searching for something nobody has crawled yet starts a crawl for it. The search
+itself returns immediately with whatever is already known; the crawl runs behind it
+and the results page refreshes itself when new listings land.
+
+This is wired to a public input box, so the defaults are cautious:
+
+| Setting | Default | Why |
+|---|---|---|
+| `min_results` | 5 | A query that already has good answers never touches the network |
+| `cooldown_hours` | 24 | The same keyword is not re-crawled, however many times it is searched |
+| `max_pages` | 1 | Shallow, so results appear in a minute rather than twenty |
+| `fetch_details` | false | Detail pages are the slow part; the scheduled crawl fills them in |
+| `max_queue` | 20 | Past this depth new work is refused rather than queued forever |
+| `sites` | all enabled | Narrow to the HTTP-only adapters for faster results |
+
+One background worker drains the queue serially, so ten people searching ten things
+produces a queue, not ten simultaneous crawls across eleven marketplaces. A crawl
+that fails still starts the cooldown -- a site that just blocked you will block you
+again a minute later, and retrying on every search turns a block into a ban.
+
+See what people have been searching for:
+
+```bash
+python -m sourcehub.cli demand
+```
+
+```bash
+python -m sourcehub.cli demand --failed
+```
+
+Keywords asked for often that find nothing are the useful signal: either the query
+needs different wording, or an adapter needs attention. Turn the whole thing off with
+`live_search.enabled: false` in `config.yaml`.
