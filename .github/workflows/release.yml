@@ -34,7 +34,7 @@ jobs:
       - name: Check Docker Hub credentials exist
         run: |
           if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "::error::DOCKERHUB_TOKEN is not set. Add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN under Settings > Secrets and variables > Actions."
+            echo "::error::DOCKERHUB_TOKEN is not set. Add a repository secret named exactly DOCKERHUB_TOKEN (Settings > Secrets and variables > Actions) holding a Docker Hub access token with Read and Write permission."
             exit 1
           fi
 
@@ -42,7 +42,7 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME || 'allornothing' }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Unraid is x86_64 only, so arm64 would be build time spent for zero users.

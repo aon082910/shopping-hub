@@ -8,16 +8,23 @@
 
 ## One-time setup for releases
 
-`release.yml` needs two repository secrets. Add them under
-**Settings -> Secrets and variables -> Actions**:
+`release.yml` needs exactly one repository secret, added under
+**Settings -> Secrets and variables -> Actions -> New repository secret**:
 
 | Secret | Value |
 |---|---|
-| `DOCKERHUB_USERNAME` | `allornothing` |
-| `DOCKERHUB_TOKEN` | A Docker Hub **access token** with Read/Write, from Account Settings -> Personal access tokens |
+| `DOCKERHUB_TOKEN` | A Docker Hub **access token** with Read & Write, from https://app.docker.com/settings/personal-access-tokens |
 
-Use an access token, not your password: a token can be revoked on its own and is
-scoped to the registry.
+The name must be exactly `DOCKERHUB_TOKEN` -- the workflow reads that string, and any
+other name reads as empty. The *value* is the token; the secret's name is not where
+the username goes.
+
+The Docker Hub account name is not a secret (it is already public in the image tag
+`allornothing/shopping-hub`), so it is hardcoded. Publishing under a different
+account only needs a repository **variable** named `DOCKERHUB_USERNAME`.
+
+Use an access token, not your password: a token is scoped to the registry and can be
+revoked on its own.
 
 Then publishing is:
 
