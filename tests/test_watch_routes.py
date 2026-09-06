@@ -115,6 +115,7 @@ def test_unchecked_boxes_stay_false():
     with session_scope() as session:
         w = session.query(Watch).order_by(Watch.id.desc()).first()
         assert w.use_landed is False and w.direct_only is False and w.on_restock is False
+        assert w.on_new_site is False
     print("  omitted checkboxes are stored as false, not true")
 
 
@@ -129,7 +130,32 @@ def test_a_watch_needs_a_target_or_a_restock_trigger():
     r = client.post("/watches", data={"slug": slug, "on_restock": "true", "label": "restock only"},
                     auth=AUTH, follow_redirects=False)
     assert r.status_code == 303, "a restock-only watch is legitimate and was refused"
+
+    r = client.post("/watches", data={"slug": slug, "on_new_site": "true", "label": "new site only"},
+                    auth=AUTH, follow_redirects=False)
+    assert r.status_code == 303, "a new-site-only watch is legitimate and was refused"
     print("  a watch that could never fire is refused")
+
+
+def test_new_site_watch_seeds_known_sites_from_current_offers():
+    """The baseline is the product's current sites, not empty -- otherwise the
+    first check after creation would treat every site it already had as new."""
+    slug = _seed()
+    client = TestClient(app)
+    r = client.post(
+        "/watches",
+        data={"slug": slug, "on_new_site": "true", "label": "new site watch"},
+        auth=AUTH, follow_redirects=False,
+    )
+    assert r.status_code == 303
+
+    with session_scope() as session:
+        w = session.query(Watch).order_by(Watch.id.desc()).first()
+        assert w.on_new_site is True
+        assert len(w.known_site_ids) == 1, (
+            f"expected the one seeded offer's site, got {w.known_site_ids}"
+        )
+    print("  a new-site watch starts from the sites the product already has")
 
 
 def test_webhook_scheme_is_checked():
@@ -227,6 +253,7 @@ if __name__ == "__main__":
         test_create_round_trips_the_form,
         test_unchecked_boxes_stay_false,
         test_a_watch_needs_a_target_or_a_restock_trigger,
+        test_new_site_watch_seeds_known_sites_from_current_offers,
         test_webhook_scheme_is_checked,
         test_duplicate_label_is_explained_not_a_500,
         test_toggle_and_delete,

@@ -18,7 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from sqlalchemy import select
@@ -36,6 +36,9 @@ class Trigger:
     price: float
     previous: Optional[float]
     site: str
+    # Populated only for an on_new_site trigger: the site(s) that were not
+    # selling this product as of the watch's last check.
+    new_sites: list[str] = field(default_factory=list)
 
     @property
     def drop(self) -> Optional[float]:
@@ -88,6 +91,41 @@ def check_watches(session: Session, notify: bool = True) -> list[Trigger]:
         # price happens to sit below the target.
         was_below = previous is not None and target is not None and previous <= target
 
+        # --- new-site watch -------------------------------------------------
+        # The cross-marketplace thesis this app exists for, as an alert: fire
+        # when a site that was NOT already selling this product starts to.
+        if watch.on_new_site:
+            current_site_ids = set(
+                session.scalars(
+                    select(Offer.site_id).where(
+                        Offer.canonical_id == watch.canonical_id,
+                        Offer.is_active.is_(True),
+                    )
+                ).all()
+            )
+            known = set(watch.known_site_ids or [])
+            new_ids = current_site_ids - known
+            # `known` empty means this watch has never actually checked before --
+            # every current site would look "new" and the very first check would
+            # spuriously fire for a product that has looked exactly like this
+            # since the watch was created. Just seed the baseline instead.
+            if known and new_ids:
+                new_site_names = [
+                    s.name for s in session.scalars(
+                        select(Site).where(Site.id.in_(new_ids))
+                    ).all()
+                ]
+                watch.known_site_ids = sorted(current_site_ids)
+                watch.last_triggered_at = now
+                watch.trigger_count += 1
+                trigger = Trigger(watch, product, price, previous, site, new_sites=new_site_names)
+                triggers.append(trigger)
+                if notify:
+                    deliver(trigger)
+                watch.last_price_usd = price
+                continue
+            watch.known_site_ids = sorted(current_site_ids)
+
         # --- restock watch -------------------------------------------------
         if watch.on_restock:
             in_stock = any(
@@ -122,6 +160,24 @@ def check_watches(session: Session, notify: bool = True) -> list[Trigger]:
     return triggers
 
 
+def _trigger_text(trigger: Trigger) -> str:
+    """Human summary of what fired. target_usd is None for a restock or
+    new-site watch, so the price-target phrasing can't be used unconditionally --
+    that used to format ``None`` straight into the message and crash the delivery.
+    """
+    title = trigger.product.title_en[:90]
+    if trigger.new_sites:
+        return (
+            f"{title} is now available on {', '.join(trigger.new_sites)} as well "
+            f"-- best price ${trigger.price:.2f} on {trigger.site}"
+        )
+    if trigger.watch.on_restock:
+        return f"{title} is back in stock, ${trigger.price:.2f} on {trigger.site}"
+    target = trigger.watch.target_usd
+    target_note = f" (target ${target:.2f})" if target is not None else ""
+    return f"{title} is ${trigger.price:.2f} on {trigger.site}{target_note}"
+
+
 def deliver(trigger: Trigger) -> bool:
     """POST a webhook, if the watch has one. Slack/Discord/Teams all accept this."""
     url = trigger.watch.notify_url
@@ -131,16 +187,14 @@ def deliver(trigger: Trigger) -> bool:
         return False
 
     body = {
-        "text": (
-            f"{trigger.product.title_en[:90]} is ${trigger.price:.2f} on "
-            f"{trigger.site} (target ${trigger.watch.target_usd:.2f})"
-        ),
+        "text": _trigger_text(trigger),
         "product": trigger.product.title_en,
         "slug": trigger.product.slug,
         "price_usd": trigger.price,
         "previous_usd": trigger.previous,
         "site": trigger.site,
         "target_usd": trigger.watch.target_usd,
+        "new_sites": trigger.new_sites,
     }
     try:
         import httpx

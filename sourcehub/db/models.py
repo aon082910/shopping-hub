@@ -534,7 +534,7 @@ class SearchDemand(Base):
 
     Persisted rather than kept in memory because the cooldown is the only thing
     standing between "search triggers a crawl" and "every page refresh hammers
-    eleven marketplaces". A restart must not reset it.
+    seventeen marketplaces". A restart must not reset it.
     """
 
     __tablename__ = "search_demand"
@@ -590,6 +590,14 @@ class Watch(Base, TimestampMixin):
     # about price, and that transition is invisible without watching for it.
     on_restock: Mapped[bool] = mapped_column(Boolean, default=False)
     last_in_stock: Mapped[Optional[bool]] = mapped_column(Boolean)
+    # Fire when a site that was not already selling this product starts to --
+    # the cross-marketplace thesis this whole app is built on made concrete as an
+    # alert: "somewhere new now carries this". Distinct from a price/restock
+    # target, which fire on a site the watch already knew about.
+    on_new_site: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Site ids seen as of the last check, so only a genuinely new arrival fires --
+    # not every site the product already had when the watch was created.
+    known_site_ids: Mapped[list] = mapped_column(JSON, default=list)
     notify_url: Mapped[Optional[str]] = mapped_column(String(1024))
 
     # Price when the watch was created, so "cheapest ever seen" is meaningful.
