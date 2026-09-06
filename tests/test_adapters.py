@@ -50,11 +50,6 @@ MIN_OFFERS = 3
 # general bar where its markup genuinely cannot do better -- writing the reason down
 # keeps this a considered exception rather than a quietly lowered standard.
 SITE_EXPECTATIONS: dict[str, dict] = {
-    "dhgate": {
-        "min_image_ratio": 0.1,
-        "why": "search cards lazy-load their photos, so the <img> is a promo "
-               "placeholder and the real image only exists after the detail fetch",
-    },
     "globalsources": {
         "min_priced_ratio": 0.2,
         "why": "a large share of listings are 'price on request' by design",

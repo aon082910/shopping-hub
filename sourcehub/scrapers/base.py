@@ -494,9 +494,17 @@ class SiteAdapter(ABC):
         return found.attributes.get(attr)
 
     @staticmethod
-    def first_attr(node, attrs: tuple[str, ...] = ("src", "data-src", "data-lazy-src",
-                                                   "data-original", "data-ks-lazyload")):
-        """Image URL from whichever lazy-load attribute this site happens to use."""
+    def first_attr(node, attrs: tuple[str, ...] = ("data-src", "data-lazy-src",
+                                                   "data-original", "data-ks-lazyload", "src")):
+        """Image URL from whichever lazy-load attribute this site happens to use.
+
+        Lazy-load attributes are checked before ``src`` on purpose: several sites
+        (made-in-china among them) ship a real-looking but useless placeholder in
+        ``src`` -- not a ``data:`` URI, just a shared "image pending" asset -- and
+        put the actual photo in ``data-original``/``data-src``. Checking ``src``
+        first would silently return that placeholder for every offer. Sites with no
+        lazy attribute at all (most logos/icons) still fall through to ``src``.
+        """
         if node is None:
             return None
         for a in attrs:

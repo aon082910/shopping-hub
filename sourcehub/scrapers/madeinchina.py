@@ -89,7 +89,12 @@ class MadeInChinaAdapter(SiteAdapter):
             shipping_from=clean(self.text_of(card, "[class*='province'], [class*='location']")) or None,
             raw={"source": "search"},
         )
-        u = self.first_attr(card.css_first("img"))
+        # The card's *first* <img> in document order is the "Secured Trading"
+        # badge, not the product photo -- picking it blind (as this used to)
+        # mostly fed the phash pipeline an SVG icon shared by every listing on
+        # the page. The real photo lives in .img-thumb-inner.
+        img_node = card.css_first("img.J-firstLazyload") or card.css_first(".img-thumb-inner img")
+        u = self.first_attr(img_node)
         if u:
             offer.image_urls.append(u if u.startswith("http") else "https:" + u)
         return offer

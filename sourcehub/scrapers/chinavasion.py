@@ -158,10 +158,18 @@ class ChinavasionAdapter(SiteAdapter):
         if crumbs:
             offer.category_path = " > ".join(crumbs[:4])
 
-        for img in tree.css(".fotorama__img, .gallery-placeholder img, [class*='product-image'] img")[:12]:
+        # Verified against the live template (2026 redesign): the old Magento
+        # fotorama/gallery-placeholder markup is gone, there is no schema.org
+        # Product node to fall back on (apply_json_ld above finds nothing), and
+        # #pix_box is now the only reliable anchor for the product's own photos --
+        # it also wraps two prev/next arrow icons served from the theme's static
+        # path rather than the image CDN, hence the chv.me filter.
+        for img in tree.css(".pix_box img"):
             u = self.first_attr(img)
-            if u:
-                offer.image_urls.append(u)
+            if u and "chv.me" in u:
+                offer.image_urls.append(u if u.startswith("http") else "https:" + u)
+            if len(offer.image_urls) >= 12:
+                break
 
         desc = tree.css_first("#description, .product.attribute.description, [class*='product-info']")
         if desc:

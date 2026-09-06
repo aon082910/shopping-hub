@@ -7,6 +7,7 @@ often than most, so ``landed_cost_usd`` is usually computable here.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Iterator, Optional
@@ -19,6 +20,62 @@ from ..util.text import clean
 from .base import RawOffer, SiteAdapter
 
 log = logging.getLogger(__name__)
+
+
+def _search_image_map(body: str) -> dict[str, str]:
+    """itemcode -> image url, read out of the search page's embedded state.
+
+    Search cards render their photo as a CSS background-image assigned by client
+    JS; the <img> tags themselves are always empty ("class=LazyLoad", no src, no
+    data-src). The real per-item data -- including "bigimagepath" -- lives in a
+    ``"totalProducts": [...]`` array embedded in a <script> block on the same page,
+    so this reads from there instead of the DOM. Bracket-matched by hand rather
+    than a regex because the array holds arbitrarily nested objects and strings
+    that themselves contain "[" / "]" (URLs with query strings, escaped quotes).
+    """
+    key = '"totalProducts":'
+    i = body.find(key)
+    if i == -1:
+        return {}
+    start = body.find("[", i)
+    if start == -1:
+        return {}
+    depth, in_str, esc, end = 0, False, False, None
+    for j in range(start, len(body)):
+        c = body[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                end = j + 1
+                break
+    if end is None:
+        return {}
+    try:
+        items = json.loads(body[start:end])
+    except Exception as e:
+        log.debug("[dhgate] totalProducts did not parse as JSON: %s", e)
+        return {}
+    out: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("itemcode") or "")
+        img = item.get("bigimagepath") or item.get("seo300ImagePath")
+        if code and img:
+            out[code] = img
+    return out
 
 
 class DHgateAdapter(SiteAdapter):
@@ -49,15 +106,16 @@ class DHgateAdapter(SiteAdapter):
             if not cards:
                 log.info("[dhgate] no cards on page %s for %r", page, keyword)
                 return
+            image_map = _search_image_map(body)
             for card in cards:
                 try:
-                    offer = self._parse_card(card)
+                    offer = self._parse_card(card, image_map)
                     if offer:
                         yield offer
                 except Exception as e:
                     log.debug("[dhgate] bad card: %s", e)
 
-    def _parse_card(self, card) -> Optional[RawOffer]:
+    def _parse_card(self, card, image_map: dict[str, str] | None = None) -> Optional[RawOffer]:
         # Verified against live markup: cards are .gallery-main, with the title in
         # .gallery-pro-name, the price in .current-price ("US $2.26 - 3.14/Piece")
         # and the seller in .store-name.
@@ -125,7 +183,13 @@ class DHgateAdapter(SiteAdapter):
                 if cost is not None:
                     offer.shipping_cost, offer.shipping_currency = cost, sccy
 
+        # The card's own <img> is always an empty ".LazyLoad" div with no src or
+        # data-src -- the photo is painted in as a CSS background-image by client
+        # JS. image_map (built once per page from the embedded product state)
+        # is the only place this URL exists in what plain HTTP actually receives.
         u = self.first_attr(card.css_first("img"))
+        if not u and image_map:
+            u = image_map.get(str(pid))
         if u:
             offer.image_urls.append(u if u.startswith("http") else "https:" + u)
         return offer
