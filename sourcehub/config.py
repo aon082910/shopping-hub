@@ -12,9 +12,20 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# pydantic-settings' env_file loading only fills in the Settings *object* below --
+# it never touches os.environ. That is invisible everywhere code reads a value off
+# `get_settings()`, but providers.yaml's `value_env` / `${VAR}` placeholders
+# (scrapers/provider.py) are resolved with a plain `os.environ.get`, by design,
+# since a preset can name an arbitrary env var that has no matching Settings
+# field. Without this, anything set only in .env -- which is the documented way
+# to configure it -- was silently invisible to that lookup. `override=False` so a
+# real environment variable (container secret, CI) still wins over .env.
+load_dotenv(ROOT / ".env", override=False)
 
 
 def config_dir() -> Path:
@@ -72,6 +83,7 @@ class Settings(BaseSettings):
     ebay_client_secret: str = ""
     octopart_client_id: str = ""
     octopart_client_secret: str = ""
+    bestbuy_api_key: str = ""
     cn_provider_preset: str = "otapi"   # a key from providers.yaml
     cn_provider_base_url: str = ""      # overrides the preset's base_url
     cn_provider_key: str = ""
