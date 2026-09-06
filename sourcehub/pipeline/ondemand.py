@@ -3,7 +3,7 @@
 Without this the catalogue only ever contains what someone thought to crawl in
 advance, so a search for anything else returns nothing and looks broken.
 
-Three things make this safe to wire to a public search box:
+Four things make this safe to wire to a public search box:
 
 * **It never blocks the request.** A crawl takes minutes; a search takes
   milliseconds. The search returns what is already in the database and the crawl
@@ -13,6 +13,10 @@ Three things make this safe to wire to a public search box:
 * **A persisted cooldown.** The same keyword is not re-crawled for
   `cooldown_hours`, no matter how many times it is searched or how often the
   process restarts.
+* **A per-caller budget.** The cooldown is per *keyword*, which stops the same
+  search repeating but does nothing about one client asking for a hundred
+  different ones. `per_client_hourly` caps how many crawls a single caller can
+  start, so a bot walking a wordlist cannot monopolise the worker.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import logging
 import queue
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,6 +60,10 @@ class LiveSearchPolicy:
     fetch_details: bool = False
     max_queue: int = 20
     min_chars: int = 3
+    # Crawls one caller may start per hour. Only requests that would actually
+    # begin a crawl count against it -- a repeat of something already queued or
+    # still in cooldown is free, because it costs no traffic.
+    per_client_hourly: int = 6
     sites: list[str] = field(default_factory=list)
 
     @classmethod
@@ -70,6 +79,7 @@ class LiveSearchPolicy:
             fetch_details=bool(raw.get("fetch_details", base.fetch_details)),
             max_queue=int(raw.get("max_queue", base.max_queue)),
             min_chars=int(raw.get("min_chars", base.min_chars)),
+            per_client_hourly=int(raw.get("per_client_hourly", base.per_client_hourly)),
             sites=list(raw.get("sites") or []),
         )
 
@@ -83,6 +93,12 @@ COOLDOWN = "cooldown"      # crawled recently
 PENDING = "pending"        # already queued or running
 QUEUED = "queued"          # accepted just now
 BUSY = "busy"              # queue full
+THROTTLED = "throttled"    # this caller has started enough crawls for one hour
+
+# Upper bound on how many callers we keep a window for. A public instance will be
+# scanned by things that rotate source addresses; without a cap the ledger is an
+# unbounded dict keyed by attacker-controlled input.
+MAX_TRACKED_CLIENTS = 4096
 
 
 class CrawlQueue:
@@ -94,6 +110,10 @@ class CrawlQueue:
         # with the same settings the caller was gated against rather than
         # silently re-reading config and doing something else.
         self._policies: dict[str, LiveSearchPolicy] = {}
+        # Client key -> timestamps of the crawls it started, newest last. A plain
+        # sliding window rather than a token bucket: the window is what the limit
+        # is actually phrased as ("six an hour"), so there is nothing to translate.
+        self._starts: dict[str, list[float]] = {}
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
         # Keyword -> "queued" | "running". In-process view; the database row is
@@ -113,7 +133,8 @@ class CrawlQueue:
 
     # ---------------------------------------------------------------- submit
     def submit(self, keyword: str, *, local_results: int = 0,
-               policy: LiveSearchPolicy | None = None) -> str:
+               policy: LiveSearchPolicy | None = None,
+               client: str | None = None) -> str:
         """Consider crawling `keyword`. Returns one of the outcome constants."""
         pol = policy or LiveSearchPolicy.from_config()
         norm = normalize(keyword)
@@ -132,6 +153,11 @@ class CrawlQueue:
                 return BUSY
             if self._recently_crawled(norm, pol.cooldown_hours):
                 return COOLDOWN
+            # Checked last, so only a request that would genuinely put traffic on
+            # the wire spends any of the caller's budget.
+            if not self._charge_client(client, pol.per_client_hourly):
+                log.info("live search: %r throttled for client %s", norm, client)
+                return THROTTLED
             self._inflight[norm] = QUEUED
             self._policies[norm] = pol
             self._record_request(norm, keyword, status=QUEUED)
@@ -139,6 +165,43 @@ class CrawlQueue:
             self._ensure_worker()
         log.info("live search: queued %r (queue depth %d)", norm, self._q.qsize())
         return QUEUED
+
+    # --------------------------------------------------------------- throttle
+    def _charge_client(self, client: str | None, hourly: int) -> bool:
+        """Spend one of `client`'s hourly crawls. False when it has none left.
+
+        Callers with no identity (the CLI, the scheduler, tests) are never
+        throttled: the limit exists to stop one *remote* caller monopolising the
+        worker, and there is nothing to attribute a local call to.
+        """
+        if not client or hourly <= 0:
+            return True
+
+        now = time.monotonic()
+        cutoff = now - 3600.0
+        window = [t for t in self._starts.get(client, ()) if t > cutoff]
+        if len(window) >= hourly:
+            self._starts[client] = window
+            return False
+
+        window.append(now)
+        self._starts[client] = window
+        if len(self._starts) > MAX_TRACKED_CLIENTS:
+            self._evict_clients(cutoff)
+        return True
+
+    def _evict_clients(self, cutoff: float) -> None:
+        """Drop windows that have fully expired; if still over, drop the stalest.
+
+        Evicting a live window hands that client a fresh budget, so expired
+        entries go first and only genuine pressure costs anyone accuracy.
+        """
+        self._starts = {k: v for k, v in self._starts.items() if v and v[-1] > cutoff}
+        if len(self._starts) <= MAX_TRACKED_CLIENTS:
+            return
+        stalest = sorted(self._starts, key=lambda k: self._starts[k][-1])
+        for key in stalest[: len(self._starts) - MAX_TRACKED_CLIENTS]:
+            self._starts.pop(key, None)
 
     # ---------------------------------------------------------------- worker
     def _ensure_worker(self) -> None:
@@ -247,8 +310,9 @@ def _aware(value: dt.datetime) -> dt.datetime:
 QUEUE = CrawlQueue()
 
 
-def request_crawl(keyword: str, local_results: int = 0) -> str:
-    return QUEUE.submit(keyword, local_results=local_results)
+def request_crawl(keyword: str, local_results: int = 0,
+                  client: str | None = None) -> str:
+    return QUEUE.submit(keyword, local_results=local_results, client=client)
 
 
 def crawl_status(keyword: str) -> dict[str, Any]:

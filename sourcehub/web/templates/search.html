@@ -34,6 +34,13 @@
 <div class="live-crawl muted">
   The crawl queue is full right now &mdash; this search was not queued. Try again shortly.
 </div>
+{% elif live == "throttled" %}
+<div class="live-crawl muted">
+  You have started as many background crawls as this hour allows, so
+  &ldquo;{{ q }}&rdquo; was not queued. Anything already in the catalogue is still
+  shown above. Raise <code>live_search.per_client_hourly</code> in
+  <code>config.yaml</code> if this is your own instance.
+</div>
 {% endif %}
 
 {% if category and category.children %}

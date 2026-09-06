@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     deepl_api_key: str = ""
 
     # networking
+    # Set true only when something you control terminates in front of this app and
+    # rewrites X-Forwarded-For. Left false, the header is ignored: it is trivially
+    # forgeable, and trusting it by default would let one caller present a fresh
+    # identity per request and walk straight through the live-search rate limit.
+    sourcehub_trust_proxy: bool = False
     sourcehub_proxy: str = ""
     sourcehub_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

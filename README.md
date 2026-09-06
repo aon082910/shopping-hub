@@ -18,7 +18,7 @@ Chinavasion  Global Sources  Made-in-China  GearBest  Banggood
 
 Open the **Apps** tab, search **shopping-hub**, hit Install. Set an admin token and
 leave `--shm-size=1g` in Extra Parameters. Full walkthrough in [UNRAID.md](UNRAID.md); the container template lives in
-[aon082910/Unraid-CA](https://github.com/aon082910/Unraid-CA).
+[aon082910/AoN-Unraid-Apps](https://github.com/aon082910/AoN-Unraid-Apps).
 
 ### Docker
 
@@ -366,7 +366,10 @@ provider-probe   test a providers.yaml preset      --preset --site --keyword --l
 rematch          retry matching on unmatched listings
 recategorize     reclassify every product
 reindex          rebuild the search index
-prune            deactivate listings that have disappeared
+prune            retire vanished listings, reclaim space  --days --history-days --media --vacuum --all
+backup           snapshot the database while it serves     --out --keep
+retention        run the scheduled backup + reclaim pass   --no-backup
+demand           keywords people searched for              --limit --failed
 fx               refresh exchange rates
 stats            catalog summary
 ```
@@ -566,6 +569,36 @@ considered.
 
 ---
 
+## Housekeeping
+
+Nothing else in this app deletes anything, and an instance left running grows
+forever: one price point per listing per refresh, plus image files that no row
+references after a merge or a failed ingest. The `retention` job handles both,
+weekly by default.
+
+```bash
+python -m sourcehub.cli retention          # what the scheduler runs
+python -m sourcehub.cli backup --keep 7    # snapshot only
+python -m sourcehub.cli prune --all        # reclaim only
+```
+
+It backs up *first* and reclaims second, so the snapshot is always the one that
+still has whatever the reclaim removed. Two things it will not do:
+
+* **Delete the last price point for a listing.** Something nobody re-prices would
+  otherwise lose its price entirely rather than just its history.
+* **Delete a media file another record still points at, or one written in the last
+  24 hours.** Images are shared between records by content hash, and the image store
+  writes the file before inserting its row -- so a sweep that matched per-record, or
+  ignored file age, would eat live data.
+
+Backups use SQLite's online backup API rather than copying the file, so they are safe
+to take while the app is serving; a plain `cp` of a database mid-write is a corrupt
+copy. Tune it under `retention:` in `config.yaml`; set `backups: 0` to skip snapshots
+if something else already covers the appdata directory.
+
+---
+
 ## Manual catalog fixes
 
 The matcher is conservative, so real duplicates sometimes survive it and occasional
@@ -681,12 +714,26 @@ Tune in [`freight.yaml`](freight.yaml).
 
 ## Watches and alerts
 
+Open any product and use **Watch this price** at the bottom of the page; **Watches**
+in the top bar lists them, and can pause, delete, or fire one on demand to check the
+notification URL actually works. A watch that never fires and a watch whose webhook
+URL is wrong look identical from the outside -- both are silence -- so **Test** is
+the only way to tell them apart without waiting for a price to move.
+
+The same thing from the CLI:
+
 ```bash
 python -m sourcehub.cli watch add <product-slug> --target 9.99 --landed
 python -m sourcehub.cli watch add <product-slug> --restock
 python -m sourcehub.cli watch list
 python -m sourcehub.cli watch check
 ```
+
+The web surface is gated with the admin token, not left open like browsing. A watch
+stores a URL this server later POSTs to, so an unauthenticated form for creating one
+is a server-side request forgery hole. Private addresses are deliberately *not*
+blocked, though -- on a home server the target is almost always a Gotify, ntfy or
+Home Assistant box on the same LAN.
 
 Watches target **products, not offers** — sellers delist and relist constantly, so a
 watch pinned to an offer id would silently stop firing. They re-arm rather than
@@ -728,6 +775,13 @@ This is wired to a public input box, so the defaults are cautious:
 | `max_pages` | 1 | Shallow, so results appear in a minute rather than twenty |
 | `fetch_details` | false | Detail pages are the slow part; the scheduled crawl fills them in |
 | `max_queue` | 20 | Past this depth new work is refused rather than queued forever |
+| `per_client_hourly` | 6 | `cooldown_hours` stops one keyword repeating; this stops one caller asking for a hundred different ones |
+
+Callers are identified by source address. Behind a reverse proxy every request
+appears to come from the proxy, so set `SOURCEHUB_TRUST_PROXY=true` to read
+`X-Forwarded-For` instead -- but only when that proxy is yours. Left off, the header
+is ignored, because a caller who can set it can otherwise present a fresh identity
+per request and walk straight through the limit.
 | `sites` | all enabled | Narrow to the HTTP-only adapters for faster results |
 
 One background worker drains the queue serially, so ten people searching ten things

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Price watches — SourceHub{% endblock %}
+
+{% block content %}
+<h1>Price watches</h1>
+
+{% if request.query_params.get('tested') == 'ok' %}
+  <div class="notice notice-ok">Test notification delivered.</div>
+{% elif request.query_params.get('tested') == 'failed' %}
+  <div class="notice notice-bad">Test notification failed — the endpoint refused it
+    or could not be reached. The server log has the reason.</div>
+{% elif request.query_params.get('tested') == 'nourl' %}
+  <div class="notice">That watch has no notification URL, so there was nothing to test.</div>
+{% endif %}
+
+<p class="muted">
+  Watches follow the <b>product</b>, not one listing — sellers delist and relist
+  constantly, and a watch pinned to a listing would quietly stop firing. They are
+  checked after every crawl, and each one alerts once per genuine drop: it re-arms
+  only after the price climbs back above your target.
+</p>
+
+{% if watches %}
+<div class="tablewrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Product</th><th class="num">Target</th><th class="num">Now</th>
+      <th>Basis</th><th>Notify</th><th class="num">Fired</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for w in watches %}
+    <tr {% if not w.enabled %}class="row-off"{% endif %}>
+      <td>
+        {% if w.slug %}
+          <a href="/product/{{ w.slug }}">{{ w.title[:70] }}</a>
+        {% else %}
+          <span class="muted">{{ w.title }}</span>
+        {% endif %}
+        {% if w.label %}<div class="muted small">{{ w.label }}</div>{% endif %}
+      </td>
+      <td class="num">
+        {% if w.target_usd %}${{ '%.2f'|format(w.target_usd) }}{% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td class="num">
+        {% if w.current_usd %}
+          <b {% if w.hit %}class="hit"{% endif %}>${{ '%.2f'|format(w.current_usd) }}</b>
+          {% if w.current_site %}<div class="muted small">{{ w.current_site }}</div>{% endif %}
+        {% else %}<span class="muted">no price</span>{% endif %}
+      </td>
+      <td class="small">
+        <span class="chip chip-quiet">{{ 'landed cost' if w.use_landed else 'unit price' }}</span>
+        {% if w.direct_only %}<span class="chip chip-quiet">direct only</span>{% endif %}
+        {% if w.on_restock %}<span class="chip chip-quiet">restock</span>{% endif %}
+      </td>
+      <td class="small">
+        {% if w.notify_url %}
+          <code class="trunc" title="{{ w.notify_url }}">{{ w.notify_url[:38] }}{% if w.notify_url|length > 38 %}…{% endif %}</code>
+        {% else %}
+          <span class="muted">log only</span>
+        {% endif %}
+      </td>
+      <td class="num">
+        {{ w.trigger_count }}
+        {% if w.last_triggered_at %}
+          <div class="muted small">{{ w.last_triggered_at.strftime('%Y-%m-%d') }}</div>
+        {% endif %}
+      </td>
+      <td class="order-cell">
+        {% if w.notify_url %}
+        <form method="post" action="/watches/{{ w.id }}/test" style="display:inline">
+          <button class="btn btn-sm" type="submit" title="Send a notification now">Test</button></form>
+        {% endif %}
+        <form method="post" action="/watches/{{ w.id }}/toggle" style="display:inline">
+          <button class="btn btn-sm" type="submit">{{ 'Pause' if w.enabled else 'Resume' }}</button></form>
+        <form method="post" action="/watches/{{ w.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete this watch?')">
+          <button class="btn btn-sm btn-danger" type="submit">Delete</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="panel">
+  <p class="muted">No watches yet. Open any product and use <b>Watch this price</b>
+  at the bottom of the page.</p>
+</div>
+{% endif %}
+
+<section>
+  <h2 class="section-head">Where alerts go
+    <small>a watch with no URL only writes to the log</small></h2>
+  <div class="panel prose">
+    <p>
+      Any endpoint accepting a JSON <code>POST</code> works — the body carries a
+      ready-made <code>text</code> field alongside the structured fields, which is
+      what Slack, Discord (add <code>/slack</code> to the webhook URL), Mattermost
+      and Home Assistant all expect. On Unraid the usual targets are a Gotify or
+      ntfy container on the same box.
+    </p>
+    <p class="muted">
+      Alerts are only as timely as your crawls: they are evaluated after each one,
+      so the <code>full_crawl</code> schedule in <code>config.yaml</code> sets how
+      quickly a drop can reach you.
+    </p>
+  </div>
+</section>
+{% endblock %}

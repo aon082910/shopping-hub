@@ -21,9 +21,9 @@ under a single `/config` mount you point at appdata.
 | Volumes | one, `/config` -> `/mnt/user/appdata/sourcehub` |
 | Database | SQLite, inside `/config` -- no second container needed |
 
-The image is large because four of the working adapters (Banggood, eBay, AliExpress
-detail pages, Chinavasion) render their listings in JavaScript and need a real
-Chromium. It is built on Microsoft's official Playwright image rather than
+The image is large because six of the enabled adapters (eBay, Banggood, AliExpress
+detail pages, plus 1688, Taobao and Tmall) render their listings in JavaScript and
+need a real Chromium. It is built on Microsoft's official Playwright image rather than
 `python:slim` -- Chromium pulls in around 90 system libraries, and hand-assembling
 those on a slim base is a brittle apt incantation that breaks on Debian point
 releases.
@@ -70,7 +70,7 @@ The manual routes are below for anyone not using CA.
 
 ```bash
 wget -O /boot/config/plugins/dockerMan/templates-user/my-shopping-hub.xml \
-  https://raw.githubusercontent.com/aon082910/Unraid-CA/main/Shopping-Hub/shopping-hub.xml
+  https://raw.githubusercontent.com/aon082910/AoN-Unraid-Apps/main/Shopping-Hub/shopping-hub.xml
 ```
 
 Then
@@ -242,6 +242,7 @@ None of these are required to boot; the app skips whatever capability is missing
 | `SOURCEHUB_PROXY` | Crawls come from your home IP. Fine for light use; a residential proxy is strongly recommended for sustained crawling. One URL, or several comma-separated for round-robin |
 | `CN_PROVIDER_KEY` | Taobao / Tmall / 1688 stay unavailable without a browser login. See below |
 | `OCTOPART_CLIENT_ID` / `SECRET` | Electronic-component part-number lookup is skipped |
+| `SOURCEHUB_TRUST_PROXY` | Live-search rate limiting counts every request as coming from one caller. Set `true` **only** if you front this with SWAG/NPM/Traefik, so `X-Forwarded-For` is read instead. Leave it off when the port is exposed directly -- the header is otherwise whatever the client typed |
 
 Translations are cached by content hash, so a repeat crawl of the same listings costs
 nothing.
@@ -271,11 +272,38 @@ Until you have done one or the other, leave those three `enabled: false` in
 
 ---
 
-## Backup
+## Backup and keeping appdata from growing
 
 Back up `/mnt/user/appdata/sourcehub` -- that is the entire application state. The CA
 Appdata Backup plugin covers it with no special configuration. `media/` is the bulk of
 it and is regenerable by re-crawling, so exclude it if you want a small backup.
+
+The container also looks after itself, weekly, without you doing anything: it takes
+its own database snapshot into `/config/db/backups`, trims price history past a year,
+deletes image files nothing references any more, and compacts the database file. This
+matters more here than on a desktop -- an appdata share that quietly grows for two
+years is the failure mode nobody notices until the array is full.
+
+Two notes on the snapshots. They use SQLite's online backup API rather than copying
+the file, so they are consistent even though the app never stops serving -- which is
+also why they are worth keeping *in* appdata for the Appdata Backup plugin to pick up,
+rather than relying on it to copy a live database safely. And they are rotated: seven
+by default.
+
+Change any of it under `retention:` in `/config/config.yaml`:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `price_history_days` | 400 | Older price points go. The newest for a listing is always kept |
+| `orphan_media` | true | Sweep image files no record points at |
+| `vacuum` | true | Compact the database file; SQLite does not shrink on its own |
+| `backups` | 7 | Snapshots to keep. `0` turns them off |
+
+Run it by hand any time:
+
+```bash
+docker exec SourceHub python -m sourcehub.cli retention
+```
 
 ---
 

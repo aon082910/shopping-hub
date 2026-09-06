@@ -8,3 +8,6 @@ data/
 *.db-shm
 tests/fixtures/
 _shots/
+
+# local editor/agent tooling
+.claude/

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from sqlalchemy import func, select
@@ -660,9 +661,90 @@ def cmd_reindex(args) -> int:
 
 
 def cmd_prune(args) -> int:
+    """Retire vanished listings, and optionally reclaim the space behind them.
+
+    Deactivating listings is the default because it is the safe, everyday half.
+    The reclaim flags delete data, so they are opt-in -- except under --all, which
+    is the one you want on a schedule.
+    """
+    from .pipeline.retention import (
+        human_bytes,
+        prune_orphan_media,
+        prune_price_history,
+        vacuum,
+    )
+
     n = deactivate_stale(days=args.days)
     print(f"Deactivated {n} listings not seen in {args.days} days.")
+
+    history_days = args.history_days
+    do_media = args.media or args.all
+    do_vacuum = args.vacuum or args.all
+    if args.all and history_days is None:
+        from .pipeline.retention import RetentionPolicy
+
+        history_days = RetentionPolicy.from_config().price_history_days
+
+    if history_days:
+        rows = prune_price_history(history_days)
+        print(f"Removed {rows} price points older than {history_days} days "
+              f"(the newest point per listing is always kept).")
+
+    if do_media:
+        rows, files, size = prune_orphan_media()
+        print(f"Removed {rows} unreachable image records and {files} unreferenced "
+              f"files ({human_bytes(size)}).")
+
+    if do_vacuum:
+        freed = vacuum()
+        print(f"VACUUM reclaimed {human_bytes(freed)}."
+              if freed > 0 else "VACUUM freed nothing (already compact).")
+
     return 0
+
+
+def cmd_backup(args) -> int:
+    """Snapshot the database while it is being served."""
+    from .pipeline.retention import backup, default_backup_dir, human_bytes
+
+    dest = args.out
+    try:
+        path = backup(dest=dest, keep=args.keep)
+    except Exception as e:
+        print(f"Backup failed: {e}")
+        return 1
+
+    size = path.stat().st_size
+    print(f"Wrote {path} ({human_bytes(size)}).")
+    if args.keep and not dest:
+        print(f"Keeping the {args.keep} newest snapshots in {default_backup_dir()}.")
+    print("Restore by stopping the app and copying this file over the live database.")
+    return 0
+
+
+def cmd_retention(args) -> int:
+    """Run the whole scheduled retention pass by hand."""
+    from .pipeline.retention import RetentionPolicy, human_bytes, run_retention
+
+    pol = RetentionPolicy.from_config()
+    if args.no_backup:
+        pol.backups = 0
+    report = run_retention(pol)
+
+    if report.backup:
+        print(f"Backup: {report.backup}")
+        if report.backups_removed:
+            print(f"  rotated out {report.backups_removed} older snapshot(s)")
+    print(f"Price history: removed {report.history_rows} rows "
+          f"older than {pol.price_history_days} days")
+    if pol.orphan_media:
+        print(f"Media: {report.media_rows} records, {report.media_files} files, "
+              f"{human_bytes(report.media_bytes)}")
+    if pol.vacuum:
+        print(f"VACUUM: reclaimed {human_bytes(report.vacuum_bytes)}")
+    for err in report.errors:
+        print(f"  ! {err}")
+    return 1 if report.errors else 0
 
 
 def cmd_demand(args) -> int:
@@ -841,9 +923,31 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_recategorize)
     sub.add_parser("reindex", help="rebuild the search index").set_defaults(func=cmd_reindex)
 
-    pr = sub.add_parser("prune", help="deactivate listings that have disappeared")
-    pr.add_argument("--days", type=int, default=30)
+    pr = sub.add_parser("prune", help="retire vanished listings and reclaim space")
+    pr.add_argument("--days", type=int, default=30,
+                    help="deactivate listings not seen in this many days")
+    pr.add_argument("--history-days", type=int, default=None,
+                    help="also delete price points older than this")
+    pr.add_argument("--media", action="store_true",
+                    help="also delete unreachable image records and unreferenced files")
+    pr.add_argument("--vacuum", action="store_true",
+                    help="also compact the database file afterwards")
+    pr.add_argument("--all", action="store_true",
+                    help="every reclaim step, using retention: from config.yaml")
     pr.set_defaults(func=cmd_prune)
+
+    bk = sub.add_parser("backup", help="snapshot the database (safe while serving)")
+    bk.add_argument("--out", type=Path, default=None,
+                    help="destination file (default: data/backups/sourcehub-<stamp>.db)")
+    bk.add_argument("--keep", type=int, default=7,
+                    help="snapshots to keep in the default directory; 0 keeps all")
+    bk.set_defaults(func=cmd_backup)
+
+    rt = sub.add_parser("retention",
+                        help="run the scheduled backup + reclaim pass by hand")
+    rt.add_argument("--no-backup", action="store_true",
+                    help="skip the snapshot and only reclaim")
+    rt.set_defaults(func=cmd_retention)
 
     dm = sub.add_parser("demand", help="keywords people searched for")
     dm.add_argument("--limit", type=int, default=30)

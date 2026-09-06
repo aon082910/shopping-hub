@@ -272,6 +272,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btn-sm { padding: 5px 10px; font-size: 12.5px; }
 .btn-quiet { background: none; color: var(--ink-soft); border: 0; }
+.btn-danger:hover { border-color: #dc2626; color: #dc2626; }
 .order-cell { display: flex; flex-direction: column; gap: 5px; align-items: stretch; min-width: 132px; }
 
 /* ------------------------------------------------------------------ footer */
@@ -343,3 +344,42 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* --- price watches ------------------------------------------------------ */
+.watch-form { display: grid; gap: 1rem; }
+.watch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: .9rem;
+}
+.watch-grid label, .watch-opts label {
+  display: block; font-size: 13px; font-weight: 650; color: var(--ink-soft);
+}
+.watch-grid .watch-wide { grid-column: 1 / -1; }
+.watch-grid input {
+  display: block; width: 100%; margin-top: .35rem; padding: .5rem .6rem;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--panel); color: inherit; font: inherit;
+}
+.watch-opts { display: grid; gap: .6rem; }
+.watch-opts label { font-weight: 400; color: inherit; }
+.watch-opts input[type="checkbox"] { margin-right: .45rem; }
+.watch-opts small { display: block; margin: .1rem 0 0 1.55rem; font-size: 12px; }
+.watch-form .btn-primary { justify-self: start; }
+
+.watch-existing { display: grid; gap: .6rem; margin-bottom: 1rem; }
+.watch-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+}
+
+.row-off { opacity: .55; }
+.hit { color: var(--accent, #2563eb); }
+.trunc { word-break: break-all; }
+
+.notice {
+  margin: 0 0 1rem; padding: .7rem 1rem; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); font-size: .93rem;
+}
+.notice-ok  { border-left: 3px solid #16a34a; }
+.notice-bad { border-left: 3px solid #dc2626; }

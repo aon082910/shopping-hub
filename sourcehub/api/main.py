@@ -5,6 +5,7 @@ Pages
     /search?q=...           full-text search across the whole catalog, with filters
     /category/{path}        browse a category or subcategory (materialized path)
     /product/{slug}         the item page: unified specs + every site's price
+    /watches                price watches and restock alerts (admin-gated)
     /admin                  crawl history and the match review queue
 
 JSON (same data, for scripting)
@@ -38,6 +39,9 @@ from ..pipeline.ondemand import crawl_status, request_crawl
 from ..pipeline.breakeven import analyse
 from ..pipeline.freight import from_specs as spec_freight
 from ..pipeline.trust import assess_offers
+from ..pipeline.watch import Trigger as WatchTrigger
+from ..pipeline.watch import current_price as watch_price
+from ..pipeline.watch import deliver as watch_deliver
 from ..db.models import (
     CanonicalProduct,
     Category,
@@ -52,6 +56,7 @@ from ..db.models import (
     PriceTier,
     Site,
     Supplier,
+    Watch,
 )
 from ..db.search import drop_product, index_product, search_product_ids, suggest
 from .security import require_admin, require_same_origin
@@ -435,6 +440,24 @@ def _as_int(v: str) -> Optional[int]:
         return None
 
 
+def _client_key(request: Request) -> str:
+    """Who to charge a live-search crawl to.
+
+    Behind a reverse proxy every request arrives from the proxy's address, so the
+    whole internet would share one budget -- hence SOURCEHUB_TRUST_PROXY. It is off
+    by default because the header is caller-supplied: honouring it on a directly
+    exposed instance would let one client mint a new identity per request and make
+    the limit worthless. Only the first hop is read; the rest of the chain is
+    whatever the client felt like appending.
+    """
+    if get_settings().sourcehub_trust_proxy:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first[:64]
+    return (request.client.host if request.client else "") or "unknown"
+
+
 # ----------------------------------------------------------------------- pages
 
 
@@ -491,7 +514,7 @@ def search_page(
     facets = compute_facets(session, [p.id for p in products])
     # Thin results are the signal that nobody has crawled this yet. Ask for a
     # crawl; it runs in the background and this response does not wait for it.
-    live = request_crawl(q, local_results=total) if q else None
+    live = request_crawl(q, local_results=total, client=_client_key(request)) if q else None
     return templates.TemplateResponse(
         request,
         "search.html",
@@ -614,6 +637,12 @@ def product_page(request: Request, slug: str, session: Session = Depends(db)):
         .limit(180)
     ).all()
 
+    # Shown read-only on a public page: the label and target are the user's own
+    # notes, and notify_url is deliberately not among the fields passed through.
+    watches = session.scalars(
+        select(Watch).where(Watch.canonical_id == product.id).order_by(Watch.id)
+    ).all()
+
     ancestors = []
     if product.category:
         node = product.category
@@ -661,6 +690,17 @@ def product_page(request: Request, slug: str, session: Session = Depends(db)):
             "categories": category_tree(session),
             "breadcrumbs": ancestors,
             "history": [{"date": str(ts)[:10], "price": price} for ts, price in history],
+            "watches": [
+                {
+                    "target_usd": w.target_usd,
+                    "use_landed": w.use_landed,
+                    "direct_only": w.direct_only,
+                    "on_restock": w.on_restock,
+                    "baseline_usd": w.baseline_usd,
+                    "enabled": w.enabled,
+                }
+                for w in watches
+            ],
             "duty": load_duty_table(),
             "economics": analyse(offer_views),
             "trust": {k: vars(v) for k, v in assess_offers(offer_views).items()},
@@ -920,6 +960,196 @@ def supplier_page(request: Request, supplier_id: int, session: Session = Depends
     )
 
 
+# ---------------------------------------------------------------- price watches
+#
+# Gated the same way as admin, for one specific reason: a watch stores a webhook
+# URL that this server later POSTs to. On an instance reachable by anyone, an open
+# form that makes the server issue arbitrary outbound requests is a server-side
+# request forgery hole, whatever else it is.
+#
+# What is deliberately *not* done is filtering that URL against private address
+# ranges. The overwhelmingly common target here is a Gotify, ntfy or Home
+# Assistant box on the same LAN, so a blocklist would break the main use case to
+# defend against something the admin gate already covers.
+
+
+def _watch_row(session: Session, w) -> dict:
+    product = session.get(CanonicalProduct, w.canonical_id)
+    price, site = watch_price(session, w)
+    return {
+        "id": w.id,
+        "label": w.label,
+        "slug": product.slug if product else None,
+        "title": product.title_en if product else "(product removed)",
+        "target_usd": w.target_usd,
+        "use_landed": w.use_landed,
+        "direct_only": w.direct_only,
+        "on_restock": w.on_restock,
+        "notify_url": w.notify_url,
+        "baseline_usd": w.baseline_usd,
+        "current_usd": price,
+        "current_site": site,
+        "enabled": w.enabled,
+        "trigger_count": w.trigger_count,
+        "last_triggered_at": w.last_triggered_at,
+        "hit": bool(price is not None and w.target_usd and price <= w.target_usd),
+    }
+
+
+def _clean_webhook(url: str) -> Optional[str]:
+    """Accept a notification URL, or reject it loudly.
+
+    Scheme-checked only. `file://` and friends are not things anyone means to put
+    here, and letting one through would turn a typo into a local file read.
+    """
+    url = (url or "").strip()
+    if not url:
+        return None
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(400, "Notification URL must start with http:// or https://")
+    return url[:1024]
+
+
+@app.get("/watches", response_class=HTMLResponse)
+def watches_page(request: Request, session: Session = Depends(db),
+                 _auth: None = Depends(require_admin)):
+    watches = session.scalars(select(Watch).order_by(Watch.id.desc())).all()
+    return templates.TemplateResponse(
+        request,
+        "watches.html",
+        {
+            "watches": [_watch_row(session, w) for w in watches],
+            "categories": category_tree(session),
+            "filters": _filters(request),
+        },
+    )
+
+
+@app.post("/watches")
+def create_watch(
+    request: Request,
+    slug: str = Form(...),
+    target: str = Form(""),
+    label: str = Form(""),
+    webhook: str = Form(""),
+    use_landed: bool = Form(False),
+    direct_only: bool = Form(False),
+    on_restock: bool = Form(False),
+    session: Session = Depends(db),
+    _auth: None = Depends(require_admin),
+    _origin: None = Depends(require_same_origin),
+):
+    product = session.scalar(select(CanonicalProduct).where(CanonicalProduct.slug == slug))
+    if product is None:
+        raise HTTPException(404, "Product not found")
+
+    target_usd = _as_float(target)
+    if target_usd is None and not on_restock:
+        raise HTTPException(
+            400, "Give a target price, or tick 'notify when back in stock'."
+        )
+
+    # (product, label) is unique, which is what lets one product carry several
+    # watches at different targets. Colliding on it is an ordinary thing for a
+    # user to do -- two unlabelled watches on the same item -- so it gets an
+    # explanation rather than the integrity error it would otherwise become.
+    clean_label = (label or "").strip()[:120]
+    if session.scalar(
+        select(Watch).where(
+            Watch.canonical_id == product.id, Watch.label == clean_label
+        )
+    ):
+        raise HTTPException(
+            400,
+            "There is already a watch on this product"
+            + (f" labelled {clean_label!r}." if clean_label else " with no label.")
+            + " Give this one a label to keep both, or edit the existing one"
+            " from the Watches page.",
+        )
+
+    watch = Watch(
+        canonical_id=product.id,
+        label=clean_label,
+        target_usd=target_usd,
+        use_landed=use_landed,
+        direct_only=direct_only,
+        on_restock=on_restock,
+        notify_url=_clean_webhook(webhook),
+    )
+    # Seed the baseline from what the watch would see right now, so "cheapest
+    # since you started watching" means something, and so a price already under
+    # target does not fire the moment the next crawl finishes.
+    price, _site = watch_price(session, watch)
+    watch.baseline_usd = price
+    watch.last_price_usd = price
+    if on_restock:
+        watch.last_in_stock = any(
+            o.in_stock
+            for o in session.scalars(
+                select(Offer).where(
+                    Offer.canonical_id == product.id, Offer.is_active.is_(True)
+                )
+            ).all()
+        )
+    session.add(watch)
+    session.commit()
+    return RedirectResponse(f"/product/{slug}#watch", status_code=303)
+
+
+@app.post("/watches/{watch_id}/delete")
+def delete_watch(watch_id: int, session: Session = Depends(db),
+                 _auth: None = Depends(require_admin),
+                 _origin: None = Depends(require_same_origin)):
+    watch = session.get(Watch, watch_id)
+    if watch is None:
+        raise HTTPException(404, "No such watch")
+    session.delete(watch)
+    session.commit()
+    return RedirectResponse("/watches", status_code=303)
+
+
+@app.post("/watches/{watch_id}/toggle")
+def toggle_watch(watch_id: int, session: Session = Depends(db),
+                 _auth: None = Depends(require_admin),
+                 _origin: None = Depends(require_same_origin)):
+    watch = session.get(Watch, watch_id)
+    if watch is None:
+        raise HTTPException(404, "No such watch")
+    watch.enabled = not watch.enabled
+    session.commit()
+    return RedirectResponse("/watches", status_code=303)
+
+
+@app.post("/watches/{watch_id}/test")
+def test_watch(watch_id: int, session: Session = Depends(db),
+               _auth: None = Depends(require_admin),
+               _origin: None = Depends(require_same_origin)):
+    """Fire this watch's webhook now, with its real current price.
+
+    A watch whose webhook URL is wrong looks identical to a watch that has not
+    triggered yet -- both are silence. This is the only way to tell them apart
+    without waiting for a price to actually move.
+    """
+    watch = session.get(Watch, watch_id)
+    if watch is None:
+        raise HTTPException(404, "No such watch")
+    if not watch.notify_url:
+        return RedirectResponse("/watches?tested=nourl", status_code=303)
+
+    product = session.get(CanonicalProduct, watch.canonical_id)
+    price, site = watch_price(session, watch)
+    ok = watch_deliver(
+        WatchTrigger(
+            watch=watch, product=product,
+            price=price if price is not None else 0.0,
+            previous=watch.last_price_usd, site=site or "test",
+        )
+    )
+    return RedirectResponse(
+        f"/watches?tested={'ok' if ok else 'failed'}", status_code=303
+    )
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin(request: Request, session: Session = Depends(db),
           _auth: None = Depends(require_admin)):
@@ -1152,7 +1382,7 @@ def api_search(
         sort=f["sort"],
         page=page,
     )
-    live = request_crawl(q, local_results=total) if q else None
+    live = request_crawl(q, local_results=total, client=_client_key(request)) if q else None
     return {
         "query": q,
         "live": live,

@@ -180,6 +180,31 @@ schedule:
   refresh_prices: "0 */6 * * *"  # every 6h - re-price known offers only
   fx_rates: "30 2 * * *"         # daily FX refresh
   rematch: "0 5 * * 0"           # weekly re-run of the matcher over unmatched offers
+  health_check: "0 7 * * *"      # daily adapter health log
+  retention: "0 4 * * 0"         # weekly backup + reclaim (see retention: below)
+
+# ----------------------------------------------------------------- retention
+# Nothing else in this app ever deletes anything, and an instance left running
+# grows forever: one price point per listing per refresh, plus image files that
+# no row references after a merge or a failed ingest.
+#
+# This pass backs up first and reclaims second, so the snapshot is always the one
+# that still has whatever the reclaim removed. It runs on the `retention` cron
+# above, or by hand with `python -m sourcehub.cli retention`.
+retention:
+  # Keep roughly a year of price points, so the product-page chart still shows a
+  # seasonal cycle. The newest point for a listing is never deleted whatever its
+  # age -- otherwise a listing nobody re-prices would lose its price entirely.
+  price_history_days: 400
+  # Delete image records whose listing is gone, then sweep files on disk that no
+  # record points at. Files are matched against surviving records rather than
+  # deleted per-record, because images are shared between rows by content hash.
+  orphan_media: true
+  # SQLite does not hand freed pages back to the filesystem on its own.
+  vacuum: true
+  # Snapshots to keep in data/backups. 0 turns backups off.
+  backups: 7
+  backup_dir: ""
 
 # --------------------------------------------------------------- live search
 # Searching for something nobody has crawled yet kicks off a crawl for it, in the
@@ -204,6 +229,16 @@ live_search:
   min_chars: 3
   # Reject new work past this queue depth rather than growing unboundedly.
   max_queue: 20
+  # Crawls one caller may start per hour. cooldown_hours stops the same keyword
+  # repeating; this stops one client asking for a hundred different ones and
+  # owning the worker all afternoon. Only requests that would really start a
+  # crawl count -- repeats and cooled-down keywords are free. 0 disables it.
+  #
+  # Callers are identified by source address. Behind a reverse proxy every
+  # request looks like it came from the proxy, so set SOURCEHUB_TRUST_PROXY=true
+  # to read X-Forwarded-For instead -- but only if that proxy is yours, since
+  # the header is otherwise whatever the client typed.
+  per_client_hourly: 6
   # Which sites to hit on demand. Empty means every enabled site. Narrowing this
   # to the fast HTTP-only adapters makes results appear sooner.
   sites: []

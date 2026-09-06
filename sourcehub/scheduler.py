@@ -1,6 +1,6 @@
 """Background scheduler — this is what makes the catalog update itself.
 
-Four jobs, all cron expressions from ``config.yaml``:
+Six jobs, all cron expressions from ``config.yaml``:
 
     full_crawl      sweep every enabled site for every seed keyword; new listings
                     are ingested with images and translated automatically
@@ -9,6 +9,8 @@ Four jobs, all cron expressions from ``config.yaml``:
     rematch         retry matching on listings that never found a sibling, since a
                     product crawled today may be the missing match for one from
                     last week
+    health_check    log loudly when an adapter stops yielding
+    retention       back up the database, then reclaim what nothing references
 
 Run in the foreground with ``python -m sourcehub.cli schedule``. On Windows, wrap
 that in Task Scheduler (or NSSM) to survive reboots; on Linux use a systemd unit.
@@ -73,6 +75,28 @@ def job_rematch() -> None:
     cmd_rematch(_Args())
 
 
+def job_retention() -> None:
+    """Back up, then reclaim what nothing references any more.
+
+    Scheduled rather than left to the CLI on purpose: on Unraid nobody opens a
+    shell in the container, so a retention pass that has to be run by hand is a
+    retention pass that never runs, and the array fills up quietly instead.
+    """
+    from .pipeline.retention import RetentionPolicy, human_bytes, run_retention
+
+    pol = RetentionPolicy.from_config()
+    report = run_retention(pol)
+    log.info(
+        "scheduled: retention done -- %s price points, %s image records, "
+        "%s files (%s), VACUUM reclaimed %s%s",
+        report.history_rows, report.media_rows, report.media_files,
+        human_bytes(report.media_bytes), human_bytes(report.vacuum_bytes),
+        f", backup {report.backup}" if report.backup else "",
+    )
+    for err in report.errors:
+        log.error("retention: %s", err)
+
+
 def job_health_check() -> None:
     """Log loudly when a site stops yielding, so a rotted selector is noticed."""
     from .health import health_summary
@@ -97,6 +121,7 @@ def build_scheduler() -> BackgroundScheduler:
         ("fx_rates", cfg.get("fx_rates", "30 2 * * *"), job_fx),
         ("rematch", cfg.get("rematch", "0 5 * * 0"), job_rematch),
         ("health_check", cfg.get("health_check", "0 7 * * *"), job_health_check),
+        ("retention", cfg.get("retention", "0 4 * * 0"), job_retention),
     ]
     for name, expr, fn in jobs:
         try:

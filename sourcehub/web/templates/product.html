@@ -378,6 +378,68 @@
   </div>
 </section>
 {% endif %}
+
+<section id="watch">
+  <h2 class="section-head">Watch this price
+    <small>alerts when it drops, checked after every crawl</small></h2>
+
+  {% if watches %}
+  <div class="panel watch-existing">
+    {% for w in watches %}
+    <div class="watch-row">
+      <div>
+        {% if w.on_restock and not w.target_usd %}
+          Alerting when this comes <b>back in stock</b>
+        {% else %}
+          Alerting below <b>${{ '%.2f'|format(w.target_usd) }}</b>
+          on {{ 'landed cost' if w.use_landed else 'unit price' }}{% if w.direct_only %}, direct-shipping sites only{% endif %}
+        {% endif %}
+        {% if w.baseline_usd %}
+          <span class="muted small">— was ${{ '%.2f'|format(w.baseline_usd) }} when you started watching</span>
+        {% endif %}
+        {% if not w.enabled %}<span class="chip chip-quiet">paused</span>{% endif %}
+      </div>
+      <a class="btn btn-sm" href="/watches">Manage</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <form class="panel watch-form" method="post" action="/watches">
+    <input type="hidden" name="slug" value="{{ product.slug }}">
+    <div class="watch-grid">
+      <label>Target price (USD)
+        <input type="number" name="target" step="0.01" min="0"
+               placeholder="{{ '%.2f'|format(product.best_price_usd * 0.9) if product.best_price_usd else '9.99' }}">
+      </label>
+      <label>Label <small class="muted">optional</small>
+        <input type="text" name="label" maxlength="120" placeholder="e.g. for the Q3 build">
+      </label>
+      <label class="watch-wide">Notify URL <small class="muted">optional — Slack, Discord, ntfy, Gotify, Home Assistant</small>
+        <input type="url" name="webhook" placeholder="https://ntfy.example.lan/sourcehub">
+      </label>
+    </div>
+    <div class="watch-opts">
+      <label><input type="checkbox" name="use_landed" value="true">
+        Compare <b>landed cost</b>, not unit price
+        <small class="muted">a unit-price alert on a 500-piece minimum fires on a number you cannot actually pay</small>
+      </label>
+      <label><input type="checkbox" name="direct_only" value="true">
+        Only sites that ship direct
+        <small class="muted">ignores listings that need a forwarding agent</small>
+      </label>
+      <label><input type="checkbox" name="on_restock" value="true">
+        Also alert when it comes back in stock
+        <small class="muted">sourcing fails as often on availability as on price</small>
+      </label>
+    </div>
+    <button class="btn btn-primary" type="submit">Watch this price</button>
+    <p class="muted small">
+      Watches are part of the admin surface, so you will be asked for your admin
+      token if one is set.
+    </p>
+  </form>
+</section>
 {% endblock %}
 
 {% block scripts %}

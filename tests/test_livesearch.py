@@ -26,6 +26,7 @@ from sourcehub.pipeline.ondemand import (  # noqa: E402
     OFF,
     PENDING,
     QUEUED,
+    THROTTLED,
     TOO_SHORT,
     CrawlQueue,
     LiveSearchPolicy,
@@ -133,6 +134,77 @@ def test_worker_uses_the_policy_it_was_queued_with():
     print("  worker keeps the submitted policy (site scope is honoured)")
 
 
+def test_one_client_cannot_own_the_worker():
+    """The cooldown is per keyword, so without this one caller walks a wordlist.
+
+    Distinct keywords each pass the cooldown check individually; only the
+    per-client budget notices that they all came from the same place.
+    """
+    q = fresh()
+    pol = LiveSearchPolicy(enabled=True, min_results=5, cooldown_hours=24,
+                           max_pages=1, max_queue=50, min_chars=3,
+                           per_client_hourly=3)
+
+    got = [q.submit(f"widget {i}", local_results=0, policy=pol, client="10.0.0.9")
+           for i in range(5)]
+    assert got[:3] == [QUEUED] * 3, f"first three should queue, got {got[:3]}"
+    assert got[3:] == [THROTTLED] * 2, f"rest should throttle, got {got[3:]}"
+
+    # A different caller is unaffected -- the limit is per client, not global.
+    assert q.submit("widget 9", local_results=0, policy=pol, client="10.0.0.10") == QUEUED
+    print("  one client's budget does not spend another's")
+
+
+def test_free_outcomes_do_not_spend_budget():
+    """Only work that would really hit the network is charged for.
+
+    Otherwise refreshing a page whose keyword is already queued would burn the
+    budget on requests that cause no traffic at all.
+    """
+    q = fresh()
+    pol = LiveSearchPolicy(enabled=True, min_results=5, cooldown_hours=24,
+                           max_pages=1, max_queue=50, min_chars=3,
+                           per_client_hourly=2)
+    client = "10.0.0.11"
+
+    assert q.submit("usb hub", local_results=0, policy=pol, client=client) == QUEUED
+    # Repeats of an in-flight keyword, and queries already answered locally.
+    for _ in range(6):
+        assert q.submit("usb hub", local_results=0, policy=pol, client=client) == PENDING
+        assert q.submit("hdmi cable", local_results=99, policy=pol,
+                        client=client) == HAVE_RESULTS
+
+    # One of the two crawls is still unspent, despite fourteen extra requests.
+    assert q.submit("sd card", local_results=0, policy=pol, client=client) == QUEUED
+    assert q.submit("psu 12v", local_results=0, policy=pol, client=client) == THROTTLED
+    print("  repeats and locally-answered queries are free")
+
+
+def test_local_callers_are_never_throttled():
+    """The CLI and scheduler have no client identity and must not be limited."""
+    q = fresh()
+    pol = LiveSearchPolicy(enabled=True, min_results=5, cooldown_hours=24,
+                           max_pages=1, max_queue=50, min_chars=3,
+                           per_client_hourly=1)
+    got = [q.submit(f"part {i}", local_results=0, policy=pol) for i in range(4)]
+    assert got == [QUEUED] * 4, f"unattributed calls were throttled: {got}"
+    print("  callers with no identity are not rate limited")
+
+
+def test_throttle_ledger_stays_bounded():
+    """A scanner rotating source addresses must not grow the ledger forever."""
+    q = fresh()
+    pol = LiveSearchPolicy(enabled=True, min_results=5, cooldown_hours=24,
+                           max_pages=1, max_queue=100000, min_chars=3,
+                           per_client_hourly=1)
+    for i in range(ondemand.MAX_TRACKED_CLIENTS + 500):
+        q.submit(f"k{i}", local_results=0, policy=pol, client=f"198.51.100.{i}")
+    assert len(q._starts) <= ondemand.MAX_TRACKED_CLIENTS, (
+        f"ledger grew to {len(q._starts)} entries"
+    )
+    print("  the per-client ledger is capped")
+
+
 if __name__ == "__main__":
     init_db()
     test_normalize()
@@ -143,4 +215,8 @@ if __name__ == "__main__":
     test_failed_crawl_still_sets_cooldown()
     test_request_counting()
     test_worker_uses_the_policy_it_was_queued_with()
+    test_one_client_cannot_own_the_worker()
+    test_free_outcomes_do_not_spend_budget()
+    test_local_callers_are_never_throttled()
+    test_throttle_ledger_stays_bounded()
     print("live search OK")
