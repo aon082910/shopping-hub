@@ -79,6 +79,22 @@ class MatchResult:
         return self.product is not None
 
 
+@dataclass
+class MatchExplanation:
+    """Diagnostic output of :meth:`MatchEngine.explain_pair` -- not used by the
+    live pipeline, only by ``match-explain`` and anything else asking "why"."""
+
+    product: CanonicalProduct
+    score: float
+    method: str
+    signals: dict
+    was_candidate: bool
+    blocked_by_rejection: bool
+    gtin_hit: bool
+    gtin_conflict: bool
+    mpn_hit: bool
+
+
 class MatchEngine:
     def __init__(self, session: Session, config: CrawlConfig | None = None):
         self.session = session
@@ -159,6 +175,67 @@ class MatchEngine:
             best.method = "review"
             return best
         return MatchResult(None, best.score, "below_threshold", best.signals)
+
+    def explain_pair(
+        self, offer: Offer, target: CanonicalProduct, specs: Sequence[OfferSpec] = ()
+    ) -> "MatchExplanation":
+        """Score ``offer`` against ``target`` directly, bypassing candidate search.
+
+        ``match()`` only ever scores an offer against products that candidate
+        generation (image LSH bands, shared title tokens, model codes) actually
+        surfaced -- most pairs never reach ``_score`` at all, so a low score is not
+        the only way two offers end up unmerged. This answers "why didn't these two
+        specifically merge" regardless of whether they would ever have crossed
+        paths, which is the question a human actually has looking at two listings
+        side by side.
+        """
+        blocked = target.id in self.blocked_canonical_ids(offer)
+        was_candidate = target.id in {c.id for c in self._candidates(offer)}
+
+        gtin_hit = bool(offer.gtin and target.gtin and offer.gtin == target.gtin)
+        gtin_conflict = bool(offer.gtin and target.gtin and offer.gtin != target.gtin)
+        mpn_hit = bool(
+            offer.mpn and offer.brand and target.mpn and target.brand
+            and offer.mpn.lower() == target.mpn.lower()
+            and offer.brand.lower() == target.brand.lower()
+        )
+
+        if gtin_hit and not blocked:
+            return MatchExplanation(
+                target, 1.0, "gtin", {"gtin": offer.gtin}, was_candidate, blocked,
+                gtin_hit, gtin_conflict, mpn_hit,
+            )
+        if mpn_hit and not blocked:
+            return MatchExplanation(
+                target, self.weights["mpn"], "brand_mpn",
+                {"mpn": offer.mpn, "brand": offer.brand}, was_candidate, blocked,
+                gtin_hit, gtin_conflict, mpn_hit,
+            )
+
+        offer_phashes = self._offer_phashes(offer)
+        offer_specs = _spec_map(specs)
+        offer_title = offer.title_en or offer.title_raw
+        offer_tokens = title_tokens(offer_title)
+        offer_codes = set(extract_model_codes(offer_title))
+
+        score, signals = self._score(
+            target, offer, offer_title, offer_tokens, offer_codes,
+            offer_phashes, offer_specs,
+        )
+
+        if blocked:
+            method = "blocked"
+        elif score >= self.auto_threshold:
+            method = "weighted"
+        elif score >= self.review_threshold:
+            method = "review"
+        else:
+            method = "below_threshold"
+
+        return MatchExplanation(
+            target, score, method, signals, was_candidate, blocked,
+            gtin_hit, gtin_conflict, mpn_hit,
+        )
 
     def apply(self, offer: Offer, result: MatchResult) -> CanonicalProduct:
         """Attach the offer to a product, creating or queueing review as needed."""
