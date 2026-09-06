@@ -149,21 +149,44 @@ you already have — they don't search the catalog. That enriches a known produc
 cannot *discover* new ones, so an agent endpoint alone will never populate the
 catalog. The shipped `agent_lookup` preset deliberately has no `search:` section.
 
-**The other catch: some show real results only when you're signed in.** Logged
-out, an agent's own "buy this link" tool can return a teaser rather than what a
-signed-in customer would actually see. One command signs a persistent browser
-profile into an agent's own site:
+**The other catch: some show real results only when you're signed in.** Not a
+hypothetical — confirmed live against USFans: its own item-detail endpoint
+answers `{"code":401,"msg":"Please log in to continue"}` for taobao/tmall when
+called anonymously (1688 lookups on the same endpoint don't require it). One
+command signs a persistent browser profile into an agent's own site:
 
 ```bash
-python -m sourcehub.cli agent-login --agent cssbuy
+python -m sourcehub.cli agent-login --agent usfans
 ```
 
 A real Chromium window opens on the agent's own site; log in by hand once (own
 profile, separate from the taobao/tmall/1688 site-login one — a different
-account on a different domain). `--list` shows the known agent keys. Set
-`via_agent_login: cssbuy` on a preset in `providers.yaml` and its calls route
-through that login's cookies instead of an anonymous request; without a prior
-login it's simply a logged-out profile, same as today.
+account on a different domain). `--list` shows the known agent keys. The
+shipped `usfans` preset already sets `via_agent_login: usfans`, so its calls
+route through that login's cookies instead of an anonymous request the moment
+you've logged in; without it, it's simply a logged-out profile, same as today.
+
+USFans also needed a `resolve` step most agents don't: its detail endpoint
+won't accept a source site's own item id for taobao/tmall, only an opaque
+token its own link-resolver issues per URL (that resolver call itself is
+anonymous, even for taobao). A preset opts in with:
+
+```yaml
+resolve:
+  path: "/api/goods/short-link/parser"
+  method: POST
+  body: {url: "{url}"}
+  map:
+    id: "data.itemNo"
+```
+
+and `detail`'s `{id}` placeholder receives the resolved value instead of the
+one you called with.
+
+Every field name and status code above was captured against the live site with
+a fabricated item id (this project has no USFans account) — the shapes are
+real, a fully-populated response is not. Expect one round of `provider-probe`
+against a real item once you've logged in.
 
 ### Hybrid mode
 
@@ -337,9 +360,12 @@ system works offline.
 
 1688, Taobao and Tmall are domestic-China only. Their offers are flagged
 `needs_agent`, and instead of a buy button the item page shows deep links into
-five forwarding agents that accept US customers — **Superbuy, Wegobuy, CSSBuy,
-Sugargoo, Hagobuy** — each pre-loaded with that exact item, plus a rough all-in
-estimate (goods + service fee + China domestic + international freight), clearly
+six forwarding agents that accept US customers — **Superbuy, Wegobuy, CSSBuy,
+Sugargoo, Hagobuy, USFans** — most pre-loaded with that exact item (USFans'
+deep link lands on its homepage with the item link pre-filled instead — no URL
+format was found that resolves it further without a JS-driven POST its own page
+makes, so you still click Search once yourself), plus a rough all-in estimate
+(goods + service fee + China domestic + international freight), clearly
 labelled an estimate because real freight is billed on volumetric weight once the
 item reaches the agent's warehouse.
 

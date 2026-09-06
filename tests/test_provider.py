@@ -465,10 +465,72 @@ def test_via_agent_login_routes_through_a_browser_session():
     check_true("the plain fetcher recorded the call", bool(fetcher.last))
 
 
+# --------------------------------------------------------- usfans (resolve step)
+
+
+def test_usfans_resolve_then_detail():
+    """The usfans preset shipped in providers.yaml, exercised against the exact
+    response shapes captured from the live site (fabricated item id, so the
+    shape is real but every value inside it is null -- see the preset's own
+    comment). Two calls, two different transports: resolve is always anonymous
+    (confirmed live even for taobao, which gates the detail call itself), so it
+    must go through the plain Fetcher while detail goes through the agent
+    session -- if resolve were accidentally routed through the browser too, or
+    detail accidentally skipped it, this would catch either mistake.
+    """
+    print("\nusfans: resolve (anonymous, plain Fetcher) then detail (agent session)")
+    import sourcehub.agents as agents_module
+
+    resolve_fetcher = FakeFetcher(
+        {"code": 200, "msg": "操作成功",
+         "data": {"itemNo": "KP8y0DJFSf2MTPSNU1ufjiwJtV2oWkGfx7MeDdhp1qyGqHmMPQ",
+                   "channelType": 2},
+         "success": True}
+    )
+    detail_session = _FakeAgentSession(
+        {"code": 200, "msg": "操作成功", "success": True,
+         "data": {"goodsId": "KP8y0DJFSf2MTPSNU1ufjiwJtV2oWkGfx7MeDdhp1qyGqHmMPQ",
+                   "title": "USB C Hub 8-in-1", "titleEn": "USB C Hub 8-in-1",
+                   "convertedPrice": 15.5, "images": ["https://example.test/a.jpg"],
+                   "detailUrl": "https://item.taobao.com/item.htm?id=700000000",
+                   "shopName": "深圳前海店", "shopNameEn": "Shenzhen Qianhai Store"}}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: detail_session
+    try:
+        client = ProviderClient("usfans", "taobao", resolve_fetcher,
+                                base_url="https://www.usfans.com")
+        offer = client.detail(
+            "700000000", url="https://item.taobao.com/item.htm?id=700000000"
+        )
+        check_true("resolve went through the plain Fetcher", bool(resolve_fetcher.last))
+        check("resolve sent the raw url in its JSON body",
+              resolve_fetcher.last["body"], {"url": "https://item.taobao.com/item.htm?id=700000000"})
+        check("exactly one call went through the agent session", len(detail_session.calls), 1)
+        check_true("the detail call used the *resolved* opaque id, not the raw item id",
+                  "goodsId=KP8y0DJFSf2MTPSNU1ufjiwJtV2oWkGfx7MeDdhp1qyGqHmMPQ"
+                  in detail_session.calls[0]["url"])
+        check_true("the detail call carries the taobao provider_code (channel=2)",
+                  "channel=2" in detail_session.calls[0]["url"])
+        check_true("offer mapped", offer is not None)
+        check("title prefers the English field", offer.title, "USB C Hub 8-in-1")
+        check("price mapped from convertedPrice", offer.price_min, 15.5)
+        check("seller prefers the English shop name", offer.seller_name, "Shenzhen Qianhai Store")
+    finally:
+        agents_module.agent_browser_session = original
+
+    print("\nusfans: a resolve step that finds nothing is a clean miss, not a crash")
+    empty_resolve = FakeFetcher({"code": 200, "data": {"itemNo": None}, "success": True})
+    client2 = ProviderClient("usfans", "taobao", empty_resolve, base_url="https://www.usfans.com")
+    result = client2.detail("1", url="https://item.taobao.com/item.htm?id=1")
+    check("no resolved id -> no offer, not an exception", result, None)
+
+
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_driver_resolution,
-               test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session):
+               test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
+               test_usfans_resolve_then_detail):
         fn()
     print("\n" + "=" * 62)
     if FAILS:

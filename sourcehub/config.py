@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     agent_ref_cssbuy: str = ""
     agent_ref_sugargoo: str = ""
     agent_ref_hagobuy: str = ""
+    agent_ref_usfans: str = ""
 
     @property
     def media_path(self) -> Path:

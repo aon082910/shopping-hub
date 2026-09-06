@@ -284,6 +284,19 @@ AGENTS = [
         sort_order=50,
     ),
     dict(
+        key="usfans",
+        name="USFans",
+        home_url="https://www.usfans.com/",
+        url_template="https://www.usfans.com/?url={url}{ref}",
+        supported_site_keys=["taobao", "tmall", "1688"],
+        service_fee_note="Tiered service fee; also does Weidian, not otherwise sourced here.",
+        notes="Its taobao/tmall item lookup requires a signed-in account (confirmed "
+        "live: 401 'Please log in to continue' when anonymous) -- see "
+        "`agent-login --agent usfans` and providers.yaml's usfans preset. "
+        "1688 lookups do not require login.",
+        sort_order=60,
+    ),
+    dict(
         key="direct",
         name="Order direct (no agent needed)",
         home_url="",

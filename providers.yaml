@@ -233,6 +233,80 @@ providers:
           value: ["value"]
 
   # ---------------------------------------------------------------------------
+  # USFans -- verified live (2026-09-07), not just written from docs: its taobao
+  # and tmall lookups genuinely 401 logged out ("Please log in to continue"),
+  # confirming this is a real case for via_agent_login, not a hypothetical one.
+  # 1688 lookups do NOT require login (confirmed 200 anonymously); harmless to
+  # route through the agent session anyway since it degrades to the same access.
+  #
+  # Two-step because USFans' detail endpoint won't accept a source site's own
+  # item id directly for taobao/tmall -- only an opaque token issued, per URL,
+  # by its own "paste a link" resolver. `resolve` runs first (always anonymous,
+  # confirmed live) and its output feeds the real detail call. 1688's own
+  # numeric id passes through the resolver unchanged.
+  #
+  # UNVERIFIED: every test above used a fabricated item id (this project has no
+  # USFans account), so every detail response came back with real field names
+  # but null/zero values -- the shape is confirmed, a fully-populated response
+  # is not. Expect one round of `provider-probe` against a real item once
+  # you've done `agent-login --agent usfans`.
+  # ---------------------------------------------------------------------------
+  usfans:
+    base_url: "https://www.usfans.com"
+    via_agent_login: usfans
+    auth:
+      mode: none
+
+    sites:
+      taobao:
+        provider_code: "2"
+        currency: CNY
+        item_url_template: "https://item.taobao.com/item.htm?id={id}"
+      tmall:
+        provider_code: "2"
+        currency: CNY
+        item_url_template: "https://detail.tmall.com/item.htm?id={id}"
+      "1688":
+        provider_code: "1"
+        currency: CNY
+        item_url_template: "https://detail.1688.com/offer/{id}.html"
+
+    resolve:
+      path: "/api/goods/short-link/parser"
+      method: POST
+      body:
+        url: "{url}"
+      map:
+        id: "data.itemNo"
+
+    detail:
+      path: "/api/goods/info"
+      method: GET
+      params:
+        channel: "{provider}"
+        goodsId: "{id}"
+        refresh: "false"
+        queryDelivery: "true"
+        activityId: ""
+
+    map:
+      detail_path: ["data"]
+      item:
+        id: ["goodsId"]
+        title: ["titleEn", "title"]
+        url: ["detailUrl"]
+        price: ["convertedPrice", "price"]
+        currency: ["currency"]
+        image: ["images[0]"]
+        images: ["images[]"]
+        seller: ["shopNameEn", "shopName"]
+        description: ["description"]
+        specs:
+          list: ["propertiesVOList", "properties"]
+          key: ["name", "key"]
+          value: ["value"]
+
+  # ---------------------------------------------------------------------------
   # Blank template. Copy, rename, fill in, probe.
   # ---------------------------------------------------------------------------
   custom:

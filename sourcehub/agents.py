@@ -95,12 +95,25 @@ def _hagobuy(url: str, site_key: str, ref: str) -> str:
     return "https://www.hagobuy.com/item/details?" + urlencode(params)
 
 
+def _usfans(url: str, site_key: str, ref: str) -> str:
+    # USFans' item resolution is an async POST from its own JS (confirmed live:
+    # POST /api/goods/short-link/parser), not a GET query param a plain link can
+    # trigger -- unlike the other agents here, no URL format was found that lands
+    # a human straight on the resolved item. Home with the link pre-filled is the
+    # honest fallback: they still have to click Search themselves.
+    params = {"url": url}
+    if ref:
+        params["ref"] = ref
+    return "https://www.usfans.com/?" + urlencode(params)
+
+
 BUILDERS = {
     "superbuy": _superbuy,
     "wegobuy": _wegobuy,
     "cssbuy": _cssbuy,
     "sugargoo": _sugargoo,
     "hagobuy": _hagobuy,
+    "usfans": _usfans,
 }
 
 

@@ -259,7 +259,13 @@ class ProviderClient:
         url = self.base_url + path
         method = str(spec.get("method", "GET")).upper()
 
-        agent_key = self.preset.get("via_agent_login")
+        # Scoped to search/detail only: a `resolve` step (turning a pasted URL
+        # into whatever opaque id the agent's real lookup wants) is typically a
+        # public, anonymous call even on an agent that gates the lookup itself --
+        # confirmed live on USFans, whose short-link parser works logged out.
+        # Routing it through a browser session too would just be slower for no
+        # reason.
+        agent_key = self.preset.get("via_agent_login") if section in ("search", "detail") else None
         if agent_key:
             # Some agents show real pricing/results only to a signed-in account;
             # a plain HTTP client has no session at all and can never reach that.
@@ -302,6 +308,22 @@ class ProviderClient:
                 yield offer
 
     def detail(self, item_id: str, url: str = "") -> Optional[RawOffer]:
+        resolve_spec = self.preset.get("resolve")
+        if resolve_spec:
+            # Some agents (USFans confirmed live) don't accept the source
+            # site's own item id at their detail endpoint at all -- only an
+            # opaque token their own "paste a link" tool issues for it, valid
+            # for that URL specifically. This step gets one, anonymously
+            # (see the via_agent_login scoping note in call()), then the real
+            # detail call below uses it in place of item_id.
+            resolved = self.call("resolve", {"id": item_id, "url": url})
+            new_id = dig(resolved, (resolve_spec.get("map") or {}).get("id"))
+            if not new_id:
+                log.info("[%s/%s] resolve step returned no usable id for %s",
+                         self.preset_name, self.site_key, url or item_id)
+                return None
+            item_id = str(new_id)
+
         payload = self.call("detail", {"id": item_id, "url": url})
         mapping = self.preset.get("map", {})
         node = dig(payload, mapping.get("detail_path")) or payload
