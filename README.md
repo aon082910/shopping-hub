@@ -1,13 +1,16 @@
 # SourceHub
 
-Scrapes 11 China-facing marketplaces, matches the same physical product across
-them, and publishes one item page per product showing every site's price, minimum
-order quantity, and disclosed shipping/fees — translated to English, with
-forwarding-agent links for the sites that won't ship to the US.
+Scrapes marketplaces across China-facing wholesale/retail, component distribution,
+and US retail, matches the same physical product across them, and publishes one
+item page per product showing every site's price, minimum order quantity, and
+disclosed shipping/fees — translated to English, with forwarding-agent links for
+the sites that won't ship to the US, and a US retail baseline to check whether
+importing is actually cheaper.
 
 ```
 AliExpress  Alibaba  1688  Taobao  Tmall  DHgate
-Chinavasion  Global Sources  Made-in-China  GearBest  Banggood
+Chinavasion  Global Sources  Made-in-China  GearBest  Banggood  Geekbuying
+LCSC  Octopart  eBay  Best Buy
 ```
 
 ---
@@ -36,13 +39,15 @@ Two image tags are published:
 
 | Tag | Pull | On disk | Adapters |
 |---|---|---|---|
-| `latest` | 1.17 GB | 4.2 GB | all 13 |
-| `slim` | 0.31 GB | 1.32 GB | 7 - no bundled browser |
+| `latest` | 1.17 GB | 4.2 GB | all 17 |
+| `slim` | 0.31 GB | 1.32 GB | 8 - no bundled browser |
 
 `slim` drops Chromium, and with it eBay, Banggood, AliExpress detail pages and
-1688/Taobao/Tmall. Alibaba, DHgate, Chinavasion, Made-in-China, GearBest, Geekbuying
-and AliExpress *search* still work. Worth knowing: losing eBay also loses the US
-retail baseline, so break-even against buying domestically goes with it. Sites that
+1688/Taobao/Tmall. Alibaba, DHgate, Chinavasion, Made-in-China, GearBest, Geekbuying,
+AliExpress *search*, and Best Buy (pure API, no browser involved either way) still
+work. Worth knowing: losing eBay does NOT lose the US retail baseline outright —
+Best Buy is API-only and survives `slim` intact — but eBay is the one with no key
+requirement, so `slim` without a Best Buy key loses the baseline anyway. Sites that
 need a browser log a clear error on `slim` rather than silently returning nothing.
 
 `--shm-size=1g` is not optional: Docker's default 64 MB `/dev/shm` makes Chromium
@@ -192,8 +197,23 @@ map:
     images: "Pictures[].Url"                                     # [] = fan out
 ```
 
-Set `CN_PROVIDER_PRESET` + `CN_PROVIDER_KEY` in `.env`, then verify before trusting
-it:
+One command sets `.env` and confirms the key actually works, per site, before you
+trust it:
+
+```bash
+.venv/bin/python -m sourcehub.cli agent-auth --preset otapi --key YOUR_INSTANCE_KEY
+```
+
+`--list` shows the presets in `providers.yaml` first, if you haven't picked one. It
+writes `CN_PROVIDER_PRESET`/`CN_PROVIDER_KEY`/`CN_PROVIDER_BASE_URL` into `.env`
+(only those lines — everything else in the file is untouched), then calls the
+preset's search endpoint for each site it covers and reports items-found and
+mapped-or-not per site, rather than trusting a key that was never actually called.
+It does not edit `config.yaml` itself (too easy to flatten the comments in a file
+meant to be hand-edited) — it prints exactly which `driver:` line to add once a site
+verifies.
+
+For the manual route, or to see the raw response when a preset needs a path fixed:
 
 ```bash
 .venv/bin/python -m sourcehub.cli provider-probe --preset otapi --site 1688 --keyword "usb hub"
@@ -266,7 +286,13 @@ treats as authoritative has to be reversible.
 
 **Translation is load-bearing here.** With `TRANSLATE_PROVIDER=none`, Chinese
 listings cannot be title-matched and will mostly stay on their own product pages.
-Set a provider if you want 1688/Taobao/Tmall to merge with the English sites.
+Set a provider if you want 1688/Taobao/Tmall to merge with the English sites --
+`google_free` needs no key or signup at all, so this isn't an all-or-nothing
+decision behind an API key. It's also the automatic fallback for any *configured*
+provider: `TRANSLATE_PROVIDER=claude` with a missing key, an expired quota, or a
+timed-out request retries once against `google_free` rather than leaving that
+batch untranslated for the whole run. Only an explicit `TRANSLATE_PROVIDER=none`
+is left alone -- that's a deliberate choice, not a failure to route around.
 
 ---
 
@@ -362,8 +388,10 @@ refresh          re-price known listings      --sites --older-than --limit
 serve            web UI                       --host --port --reload
 schedule         run the background scheduler
 browser-login    one-time login for taobao/tmall/1688
+agent-auth       set up + verify a forwarding-agent API key   --preset --key --base-url --site --list
 provider-probe   test a providers.yaml preset      --preset --site --keyword --list
 rematch          retry matching on unmatched listings
+match-explain    why (or why not) two products' offers would merge   <product_a> <product_b>
 recategorize     reclassify every product
 reindex          rebuild the search index
 prune            retire vanished listings, reclaim space  --days --history-days --media --vacuum --all
@@ -408,6 +436,13 @@ tests/
   test_pipeline.py     end-to-end: 4 listings -> 2 products, offline
   test_provider.py     provider path resolution + field mapping
   test_rejections.py   human match rulings survive rematch and re-crawl
+  test_match_explain.py  match-explain agrees with what the pipeline actually decided
+  test_variant_picker.py  the product page's Color/Size picker gets attrs/image_url, picks the right widget
+  test_sku_variants.py  the pure combination logic behind AliExpress's click-through SKU scraper
+  test_new_site_watch.py  alerts when a site that didn't sell a product starts to, and only once
+  test_schema_migration.py  init_db() upgrades an existing database in place, not just fresh ones
+  test_translate_fallback.py  a configured provider that's unreachable falls back to google_free
+  test_bestbuy.py      field mapping against Best Buy's documented API shapes
   test_adapters.py     replay captured site HTML through the real adapters
   fixtures/<site>/     captured search.html + detail.html + manifest.json
 providers.yaml         API presets for the no-login route
@@ -629,6 +664,7 @@ one quietly stops yielding.
 | Chinavasion | ⚠️ discovery only | on-site search is JS-only; uses the site's own product sitemap (~21k URLs). Prices partial — the main price is JS-injected |
 | 1688 / Taobao / Tmall | 🔑 login required | see the browser/provider section above |
 | Octopart | 🔑 key required | free Nexar key; skipped cleanly without one |
+| Best Buy | 🔑 key required | **second US retail baseline**, new/first-party stock only. Free self-serve key, no HTML fallback (Products API only — see below) |
 | **LCSC** | ❌ disabled | its public search endpoint moved and now answers HTTP 200 with an application-level 404. Adapter is correct once `SEARCH_API` points at the current path |
 | **Global Sources** | ❌ disabled | search is a JS shell yielding no product cards even rendered. It previously "worked" only because a too-broad selector was ingesting the site *navigation* as products |
 | **TOMTOP** | ❌ disabled | resets the TLS connection on every request including its homepage — site-level block or outage |
@@ -686,11 +722,15 @@ marketplace keeps refusing you, that is the first thing to check.
 
 Three things the price table alone cannot tell you, all on the item page.
 
-**Is importing actually cheaper?** eBay is crawled as a **US retail baseline** and
-labelled as one — you are not going to buy 500 units from an eBay listing, but you
-do need to know that the $4 hub landing in three weeks competes with a $9 one
-arriving Tuesday with a returns policy. The page states which wins at one unit, and
-by how much.
+**Is importing actually cheaper?** eBay and Best Buy are crawled as **US retail
+baselines** and labelled as such — you are not going to buy 500 units from either,
+but you do need to know that the $4 hub landing in three weeks competes with a $9
+one arriving Tuesday with a returns policy. The page states which wins at one unit,
+and by how much. Two baselines rather than one matters here: eBay is dominated by
+auctions and used/refurbished lots, so on its own it can make importing look better
+than it is against what a buyer actually gets choosing to buy domestically. Best
+Buy sells only new, first-party inventory at a fixed price — a fairer number to
+import against, and a check on eBay's.
 
 **At what quantity does wholesale win?** A listing at $0.90 with MOQ 500 looks ten
 times cheaper than one at $9.00 with MOQ 1, but you cannot buy one of it. The
@@ -725,6 +765,7 @@ The same thing from the CLI:
 ```bash
 python -m sourcehub.cli watch add <product-slug> --target 9.99 --landed
 python -m sourcehub.cli watch add <product-slug> --restock
+python -m sourcehub.cli watch add <product-slug> --new-site
 python -m sourcehub.cli watch list
 python -m sourcehub.cli watch check
 ```
@@ -743,9 +784,13 @@ price stayed low, so it only fires again after the price recovers above the targ
 `--landed` compares landed cost instead of unit price (a unit-price alert on a
 MOQ-500 listing fires on a number you cannot pay). `--direct-only` ignores sites
 needing a forwarding agent. `--restock` fires on availability instead of price.
-`--webhook` POSTs to any Slack/Discord/Teams-compatible URL. Checked automatically
-after every crawl, not on a separate schedule — an alert six hours late on a sold-out
-listing is worthless.
+`--new-site` fires when a site that wasn't already selling this product starts to —
+the cross-marketplace comparison this app exists for, as an alert instead of
+something you have to notice yourself. It's seeded to the sites a product already
+has when the watch is created, so the first check never "discovers" all of them as
+new. `--webhook` POSTs to any Slack/Discord/Teams-compatible URL. Checked
+automatically after every crawl, not on a separate schedule — an alert six hours
+late on a sold-out listing is worthless.
 
 ---
 
@@ -785,7 +830,7 @@ per request and walk straight through the limit.
 | `sites` | all enabled | Narrow to the HTTP-only adapters for faster results |
 
 One background worker drains the queue serially, so ten people searching ten things
-produces a queue, not ten simultaneous crawls across eleven marketplaces. A crawl
+produces a queue, not ten simultaneous crawls across seventeen marketplaces. A crawl
 that fails still starts the cooldown -- a site that just blocked you will block you
 again a minute later, and retrying on every search turns a block into a ban.
 

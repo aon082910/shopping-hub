@@ -211,10 +211,21 @@ def offer_view(session: Session, o: Offer) -> dict:
                 "currency": v.currency,
                 "in_stock": v.in_stock,
                 "stock": v.stock,
+                # {"Color": "Black", "Size": "L"} when the site actually breaks a
+                # listing into named options rather than one flat name string --
+                # this is what lets the page offer a Color/Size picker instead of
+                # just a dropdown of SKU names.
+                "attrs": v.attrs or {},
+                # Hotlinked, not downloaded through ImageStore: a listing can carry
+                # a photo per colour and downloading every one of them for every
+                # offer would multiply image-pipeline cost for a small in-page
+                # swatch. Falls back to the offer's own gallery client-side if unset.
+                "image_url": v.image_url,
             }
             for v in variants
         ],
         "variant_count": len(variants),
+        "variants_have_options": any(v.attrs for v in variants),
         "agent_links": [vars(a) for a in build_agent_links(session, o)],
         "agent_notice": agent_notice(session, o),
         "agent_estimate": (
@@ -696,6 +707,7 @@ def product_page(request: Request, slug: str, session: Session = Depends(db)):
                     "use_landed": w.use_landed,
                     "direct_only": w.direct_only,
                     "on_restock": w.on_restock,
+                    "on_new_site": w.on_new_site,
                     "baseline_usd": w.baseline_usd,
                     "enabled": w.enabled,
                 }
@@ -985,6 +997,7 @@ def _watch_row(session: Session, w) -> dict:
         "use_landed": w.use_landed,
         "direct_only": w.direct_only,
         "on_restock": w.on_restock,
+        "on_new_site": w.on_new_site,
         "notify_url": w.notify_url,
         "baseline_usd": w.baseline_usd,
         "current_usd": price,
@@ -1035,6 +1048,7 @@ def create_watch(
     use_landed: bool = Form(False),
     direct_only: bool = Form(False),
     on_restock: bool = Form(False),
+    on_new_site: bool = Form(False),
     session: Session = Depends(db),
     _auth: None = Depends(require_admin),
     _origin: None = Depends(require_same_origin),
@@ -1044,9 +1058,10 @@ def create_watch(
         raise HTTPException(404, "Product not found")
 
     target_usd = _as_float(target)
-    if target_usd is None and not on_restock:
+    if target_usd is None and not on_restock and not on_new_site:
         raise HTTPException(
-            400, "Give a target price, or tick 'notify when back in stock'."
+            400, "Give a target price, or tick 'notify when back in stock' or "
+            "'notify when a new site carries it'."
         )
 
     # (product, label) is unique, which is what lets one product carry several
@@ -1074,6 +1089,7 @@ def create_watch(
         use_landed=use_landed,
         direct_only=direct_only,
         on_restock=on_restock,
+        on_new_site=on_new_site,
         notify_url=_clean_webhook(webhook),
     )
     # Seed the baseline from what the watch would see right now, so "cheapest
@@ -1082,15 +1098,17 @@ def create_watch(
     price, _site = watch_price(session, watch)
     watch.baseline_usd = price
     watch.last_price_usd = price
-    if on_restock:
-        watch.last_in_stock = any(
-            o.in_stock
-            for o in session.scalars(
-                select(Offer).where(
-                    Offer.canonical_id == product.id, Offer.is_active.is_(True)
-                )
-            ).all()
+    active_offers = session.scalars(
+        select(Offer).where(
+            Offer.canonical_id == product.id, Offer.is_active.is_(True)
         )
+    ).all()
+    if on_restock:
+        watch.last_in_stock = any(o.in_stock for o in active_offers)
+    if on_new_site:
+        # Seeded to the sites it already has, not empty -- otherwise the first
+        # check after creation would "discover" every existing site as new.
+        watch.known_site_ids = sorted({o.site_id for o in active_offers})
     session.add(watch)
     session.commit()
     return RedirectResponse(f"/product/{slug}#watch", status_code=303)
@@ -1170,6 +1188,18 @@ def admin(request: Request, session: Session = Depends(db),
         if not offer or not product:
             continue
         site = session.get(Site, offer.site_id)
+
+        # A human deciding "is this the same product" leans on the photo far more
+        # than on a signals dict -- image similarity is the strongest merge signal
+        # this matcher has, so showing the two images side by side is showing the
+        # reviewer the same evidence the matcher itself weighted most heavily.
+        offer_img = session.scalar(
+            select(Image).where(Image.offer_id == offer.id).order_by(Image.position).limit(1)
+        )
+        product_img = (
+            session.get(Image, product.primary_image_id) if product.primary_image_id else None
+        )
+
         review_rows.append(
             {
                 "id": r.id,
@@ -1178,8 +1208,10 @@ def admin(request: Request, session: Session = Depends(db),
                 "offer_title": offer.title_en or offer.title_raw,
                 "offer_site": site.name if site else "",
                 "offer_url": offer.url,
+                "offer_image": f"/media/{offer_img.thumb_path}" if offer_img and offer_img.thumb_path else None,
                 "product_title": product.title_en,
                 "product_slug": product.slug,
+                "product_image": f"/media/{product_img.thumb_path}" if product_img and product_img.thumb_path else None,
             }
         )
 

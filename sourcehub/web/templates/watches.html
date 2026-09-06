@@ -53,6 +53,7 @@
         <span class="chip chip-quiet">{{ 'landed cost' if w.use_landed else 'unit price' }}</span>
         {% if w.direct_only %}<span class="chip chip-quiet">direct only</span>{% endif %}
         {% if w.on_restock %}<span class="chip chip-quiet">restock</span>{% endif %}
+        {% if w.on_new_site %}<span class="chip chip-quiet">new site</span>{% endif %}
       </td>
       <td class="small">
         {% if w.notify_url %}

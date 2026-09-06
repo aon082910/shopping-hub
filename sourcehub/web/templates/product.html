@@ -110,7 +110,13 @@
               <div class="native">to {{ '%.2f'|format(o.price_native_max) }}
                 across {{ o.variant_count }} options</div>
             {% endif %}
-            {% if o.variants %}
+            {% if o.variants and o.variants_have_options %}
+              <div class="variant-picker" data-offer="{{ o.id }}">
+                <script type="application/json" class="variant-data">{{ o.variants | tojson }}</script>
+                <div class="variant-groups"></div>
+                <div class="variant-status"></div>
+              </div>
+            {% elif o.variants %}
               <details class="tiers"><summary>{{ o.variants|length }} options</summary>
                 <table class="minitable">
                   {% for v in o.variants %}
@@ -388,7 +394,9 @@
     {% for w in watches %}
     <div class="watch-row">
       <div>
-        {% if w.on_restock and not w.target_usd %}
+        {% if w.on_new_site and not w.target_usd %}
+          Alerting when a <b>new site</b> starts carrying this
+        {% elif w.on_restock and not w.target_usd %}
           Alerting when this comes <b>back in stock</b>
         {% else %}
           Alerting below <b>${{ '%.2f'|format(w.target_usd) }}</b>
@@ -432,6 +440,10 @@
         Also alert when it comes back in stock
         <small class="muted">sourcing fails as often on availability as on price</small>
       </label>
+      <label><input type="checkbox" name="on_new_site" value="true">
+        Also alert when a new site starts carrying this
+        <small class="muted">the point of comparing marketplaces at all: a second seller showing up</small>
+      </label>
     </div>
     <button class="btn btn-primary" type="submit">Watch this price</button>
     <p class="muted small">
@@ -471,5 +483,89 @@ document.querySelectorAll('.thumbs img').forEach(t => {
     'low $' + lo.toFixed(2) + ' · high $' + hi.toFixed(2) +
     ' · ' + data[0].date + ' to ' + data[data.length - 1].date;
 })();
+
+// Variant pickers (colour/size/etc.) -- one independent picker per offer row,
+// since a SKU split is a property of how that one seller listed the item, not
+// of the product. Selecting an option looks up the matching variant client-side
+// and updates that row's price/stock/thumbnail; nothing round-trips to the server.
+document.querySelectorAll('.variant-picker').forEach((picker) => {
+  const dataEl = picker.querySelector('.variant-data');
+  let variants;
+  try { variants = JSON.parse(dataEl.textContent); } catch (e) { return; }
+  if (!variants || !variants.length) return;
+
+  const keys = [];
+  variants.forEach((v) => {
+    Object.keys(v.attrs || {}).forEach((k) => { if (!keys.includes(k)) keys.push(k); });
+  });
+  if (!keys.length) return;
+
+  const groupsEl = picker.querySelector('.variant-groups');
+  const statusEl = picker.querySelector('.variant-status');
+  const selected = {};
+  const seed = variants.find((v) => v.in_stock) || variants[0];
+  keys.forEach((k) => { selected[k] = (seed.attrs || {})[k]; });
+
+  function valuesFor(key) {
+    const out = [];
+    variants.forEach((v) => {
+      const val = (v.attrs || {})[key];
+      if (val && !out.includes(val)) out.push(val);
+    });
+    return out;
+  }
+
+  function findMatch() {
+    return variants.find((v) => keys.every((k) => (v.attrs || {})[k] === selected[k]));
+  }
+
+  function render() {
+    groupsEl.innerHTML = '';
+    keys.forEach((key) => {
+      const group = document.createElement('div');
+      group.className = 'variant-group';
+      const label = document.createElement('span');
+      label.className = 'variant-label';
+      label.textContent = key + ':';
+      group.appendChild(label);
+      valuesFor(key).forEach((val) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'variant-btn' + (selected[key] === val ? ' selected' : '');
+        btn.textContent = val;
+        btn.addEventListener('click', () => { selected[key] = val; render(); });
+        group.appendChild(btn);
+      });
+      groupsEl.appendChild(group);
+    });
+
+    const match = findMatch();
+    if (!match) {
+      statusEl.textContent = 'that combination is not offered';
+      statusEl.classList.remove('is-soldout');
+      return;
+    }
+    const bits = [];
+    if (match.price_usd) bits.push('$' + match.price_usd.toFixed(2) + ' for this option');
+    if (!match.in_stock) bits.push('out of stock');
+    statusEl.textContent = bits.join(' · ');
+    statusEl.classList.toggle('is-soldout', !match.in_stock);
+
+    let img = picker.querySelector('.variant-thumb');
+    if (match.image_url) {
+      if (!img) {
+        img = document.createElement('img');
+        img.className = 'variant-thumb';
+        img.alt = '';
+        picker.insertBefore(img, groupsEl);
+      }
+      img.src = match.image_url;
+      img.hidden = false;
+    } else if (img) {
+      img.hidden = true;
+    }
+  }
+  render();
+});
 </script>
 {% endblock %}

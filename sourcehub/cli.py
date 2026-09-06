@@ -17,7 +17,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 from sqlalchemy import func, select
 
@@ -376,7 +376,7 @@ def cmd_watch(args) -> int:
     from sqlalchemy import select as sa_select
 
     from .db.models import CanonicalProduct, Watch
-    from .pipeline.watch import check_watches, current_price
+    from .pipeline.watch import _trigger_text, check_watches, current_price
 
     with session_scope() as session:
         if args.action == "list":
@@ -397,6 +397,10 @@ def cmd_watch(args) -> int:
             return 0
 
         if args.action == "add":
+            if args.target is None and not args.restock and not args.new_site:
+                print("Give --target, or --restock, or --new-site -- otherwise this "
+                      "watch could never fire.")
+                return 1
             product = session.scalar(
                 sa_select(CanonicalProduct).where(CanonicalProduct.slug == args.slug)
             )
@@ -411,16 +415,31 @@ def cmd_watch(args) -> int:
                 use_landed=args.landed,
                 direct_only=args.direct_only,
                 on_restock=args.restock,
+                on_new_site=args.new_site,
                 notify_url=args.webhook,
                 baseline_usd=price,
                 last_price_usd=price,
             )
+            if args.new_site:
+                # Seeded to the sites it already has -- otherwise the first check
+                # would "discover" every existing site as new.
+                active = session.scalars(
+                    sa_select(Offer).where(
+                        Offer.canonical_id == product.id, Offer.is_active.is_(True)
+                    )
+                ).all()
+                watch.known_site_ids = sorted({o.site_id for o in active})
             session.add(watch)
             session.flush()
             print(f"Watching {product.title_en[:60]} (id {watch.id})")
-            print(f"  target ${args.target:.2f} against "
-                  f"{'landed cost' if args.landed else 'unit price'}"
-                  f"{' , direct-shipping sites only' if args.direct_only else ''}")
+            if args.target is not None:
+                print(f"  target ${args.target:.2f} against "
+                      f"{'landed cost' if args.landed else 'unit price'}"
+                      f"{' , direct-shipping sites only' if args.direct_only else ''}")
+            if args.restock:
+                print("  also alerting when it comes back in stock")
+            if args.new_site:
+                print("  also alerting when a new site starts carrying it")
             if price is not None:
                 print(f"  currently ${price:.2f}")
             return 0
@@ -440,8 +459,7 @@ def cmd_watch(args) -> int:
             print("No watches triggered.")
             return 0
         for t in triggers:
-            print(f"HIT  ${t.price:.2f} on {t.site} "
-                  f"(target ${t.watch.target_usd:.2f})  {t.product.title_en[:50]}")
+            print(f"HIT  {_trigger_text(t)}")
             print(f"     /product/{t.product.slug}")
         return 0
 
@@ -548,6 +566,154 @@ def cmd_fixtures(args) -> int:
     return 0
 
 
+def _upsert_env_vars(path: Path, updates: dict[str, str]) -> None:
+    """Set KEY=value lines in a .env file, touching only those keys.
+
+    Line-based rather than a library round-trip so every comment, blank line and
+    unrelated setting in the file survives untouched -- this file is meant to be
+    hand-edited too, and a rewrite that silently drops comments would be hostile.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    remaining = dict(updates)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in remaining:
+            lines[i] = f"{key}={remaining.pop(key)}"
+    if remaining:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append("# added by `sourcehub agent-auth`")
+        lines.extend(f"{k}={v}" for k, v in remaining.items())
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _mask(secret: str) -> str:
+    if len(secret) <= 8:
+        return "*" * len(secret)
+    return secret[:4] + "*" * (len(secret) - 8) + secret[-4:]
+
+
+def cmd_agent_auth(args) -> int:
+    """One-command setup for a forwarding agent's API, the credential-based route
+    onto 1688/Taobao/Tmall.
+
+    These three sites will not ship abroad or take a foreign card, so nothing
+    reaches them without going through a forwarding agent one way or another.
+    ``browser-login`` covers the *free* route (a human solves the agent's/site's
+    login once, headless crawls reuse that browser session). This covers the
+    *API* route some agents and resellers sell instead -- OTAPI, a RapidAPI
+    listing, or an agent's own lookup endpoint, in providers.yaml as a preset.
+
+    This does three things a hand-edit of .env does not: it validates the preset
+    name against providers.yaml before writing anything, it verifies the key
+    actually works with a real call per site rather than trusting it silently,
+    and it tells you exactly what to change in config.yaml -- which this does
+    NOT edit itself, since it is a hand-maintained file full of comments a
+    programmatic rewrite would flatten.
+    """
+    from .scrapers.provider import ProviderClient, ProviderError, get_preset, load_presets
+    from .util.http import Fetcher
+
+    if args.list:
+        presets = load_presets().get("providers", {})
+        print("Presets in providers.yaml:\n")
+        for name, spec in sorted(presets.items()):
+            caps = []
+            if spec.get("search"):
+                caps.append("search")
+            if spec.get("detail"):
+                caps.append("detail")
+            sites = ", ".join(sorted(spec.get("sites", {})))
+            print(f"  {name:<18} [{'+'.join(caps) or 'none'}]  sites: {sites}")
+        return 0
+
+    try:
+        spec = get_preset(args.preset)
+    except ProviderError as e:
+        print(f"ERROR: {e}")
+        return 1
+
+    auth_mode = (spec.get("auth") or {}).get("mode", "none")
+    if auth_mode != "none" and not args.key:
+        print(f"preset {args.preset!r} needs a key (--key). Sign up with the "
+              f"provider first if you haven't -- this command validates a key, "
+              f"it doesn't issue one.")
+        return 1
+
+    updates = {"CN_PROVIDER_PRESET": args.preset}
+    if args.key:
+        updates["CN_PROVIDER_KEY"] = args.key
+    if args.base_url:
+        updates["CN_PROVIDER_BASE_URL"] = args.base_url
+
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    _upsert_env_vars(env_path, updates)
+    print(f"wrote {env_path}"
+          + (f"  (CN_PROVIDER_KEY={_mask(args.key)})" if args.key else ""))
+
+    from dotenv import load_dotenv
+
+    # Reload so the verification below sees what was just written, in this same
+    # process -- the module-level load at import time already happened.
+    load_dotenv(env_path, override=True)
+
+    sites = _csv(args.site) or sorted(spec.get("sites", {}))
+    if not sites:
+        print("\npreset declares no sites; nothing to verify.")
+        return 1
+
+    if not spec.get("search"):
+        print(f"\npreset {args.preset!r} has no search endpoint (detail lookup only -- "
+              f"typical of an agent's own 'buy this link' API). It can enrich items "
+              f"you already discovered some other way but cannot populate the catalog "
+              f"on its own; pair it with `driver: hybrid` and browser-based discovery.")
+        print("Verify a real item id manually with:")
+        print(f"  python -m sourcehub.cli provider-probe --preset {args.preset} --site <site>")
+        return 0
+
+    print(f"\nverifying against {', '.join(sites)}...")
+    ok_sites: list[str] = []
+    for site in sites:
+        if site not in spec.get("sites", {}):
+            print(f"  {site:<8} SKIP   preset {args.preset!r} does not cover this site")
+            continue
+        fetcher = Fetcher(delay=1.0, retries=2, timeout=45)
+        try:
+            client = ProviderClient(args.preset, site, fetcher)
+            payload = client.call("search", {"keyword": "usb hub", "page": 1})
+            from .scrapers.provider import as_list, dig
+
+            items = as_list(dig(payload, client.preset.get("map", {}).get("items_path")))
+            if not items:
+                print(f"  {site:<8} FAIL   key accepted the request but 0 items came back "
+                      f"-- check items_path in providers.yaml")
+                continue
+            offer = client.to_offer(items[0])
+            if offer is None:
+                print(f"  {site:<8} FAIL   {len(items)} items found but none mapped to an "
+                      f"offer -- check map.item.* in providers.yaml")
+                continue
+            print(f"  {site:<8} ok     {len(items)} items, e.g. {offer.title[:50]!r}")
+            ok_sites.append(site)
+        except Exception as e:
+            print(f"  {site:<8} FAIL   {type(e).__name__}: {e}")
+        finally:
+            fetcher.close()
+
+    if not ok_sites:
+        print("\nNothing verified. Check the key and CN_PROVIDER_BASE_URL, or try "
+              "`provider-probe` for the raw response.")
+        return 1
+
+    print(f"\n{len(ok_sites)}/{len(sites)} site(s) verified. In config.yaml, set for each:")
+    for site in ok_sites:
+        print(f"  {site}:\n    driver: hybrid   # or: provider")
+    return 0
+
+
 def cmd_provider_probe(args) -> int:
     """Call a configured provider and show what the field mapping extracted.
 
@@ -599,6 +765,116 @@ def cmd_provider_probe(args) -> int:
         print("\nItems were found but none mapped to an offer. Check map.item.id/title/url.")
         return 1
     print("\nMapping looks good. Enable it with `driver: provider` in config.yaml.")
+    return 0
+
+
+def _resolve_product(session, ref: str) -> Optional[CanonicalProduct]:
+    if ref.isdigit():
+        return session.get(CanonicalProduct, int(ref))
+    return session.scalar(select(CanonicalProduct).where(CanonicalProduct.slug == ref))
+
+
+def cmd_match_explain(args) -> int:
+    """Score one product's offer against another product directly.
+
+    303 of this catalog's 317 products currently sit alone with no other site's
+    offer attached, and most of those pairs never even reach the matcher's scoring
+    step -- candidate search (image hashing, shared title tokens, model codes) has
+    to surface a pair before ``_score`` ever runs on it. This bypasses that and
+    scores two specific listings against each other regardless, so "why didn't
+    these merge" has an answer instead of a shrug.
+    """
+    from .pipeline.matching import MatchEngine
+    from .db.models import OfferSpec
+
+    with session_scope() as session:
+        product_a = _resolve_product(session, args.product_a)
+        if product_a is None:
+            print(f"no product matches {args.product_a!r}")
+            return 1
+        product_b = _resolve_product(session, args.product_b)
+        if product_b is None:
+            print(f"no product matches {args.product_b!r}")
+            return 1
+        if product_a.id == product_b.id:
+            print("that's the same product")
+            return 1
+
+        offer = session.scalar(
+            select(Offer)
+            .where(Offer.canonical_id == product_a.id, Offer.is_active.is_(True))
+            .order_by(Offer.id)
+        )
+        if offer is None:
+            print(f"{args.product_a!r} has no active offer to score")
+            return 1
+        specs = session.scalars(select(OfferSpec).where(OfferSpec.offer_id == offer.id)).all()
+
+        engine = MatchEngine(session, load_crawl_config())
+        exp = engine.explain_pair(offer, product_b, specs)
+
+        print(f"A: [{offer.id}] {offer.site.key}  {(offer.title_en or offer.title_raw)[:70]!r}")
+        print(f"B: [{product_b.id}] {product_b.slug}  {product_b.title_en[:70]!r}")
+        print("-" * 72)
+
+        if exp.blocked_by_rejection:
+            print("blocked: a human already rejected this pairing (see match_rejections)")
+        print(f"would ever be compared by the live matcher: "
+              f"{'yes' if exp.was_candidate else 'no -- candidate search never finds this pair'}")
+        print()
+
+        print("tier 1 -- hard identifiers")
+        print(f"  gtin   A={offer.gtin or '-'}  B={product_b.gtin or '-'}"
+              + ("  MATCH -> instant merge" if exp.gtin_hit
+                 else "  CONFLICT (blocks any merge)" if exp.gtin_conflict else ""))
+        print(f"  brand+mpn  A={offer.brand or '-'}/{offer.mpn or '-'}"
+              f"  B={product_b.brand or '-'}/{product_b.mpn or '-'}"
+              + ("  MATCH -> instant merge" if exp.mpn_hit else ""))
+
+        if exp.method in ("gtin", "brand_mpn"):
+            print(f"\nresolved at tier 1 ({exp.method}), score {exp.score:.3f} -- "
+                  "the weighted signals below never ran")
+            return 0
+
+        print()
+        print("tier 2 -- weighted signals")
+        w = engine.weights
+        for key, label in (("image", "image_phash"), ("title", "title"), ("specs", "specs")):
+            val = exp.signals.get(key)
+            if val is None:
+                continue
+            used = (
+                (key == "image" and val > 0)
+                or (key == "title" and val > 0)
+                or (key == "specs" and exp.signals.get("spec_overlap"))
+            )
+            extra = f"  (spec_overlap={exp.signals['spec_overlap']})" if key == "specs" else ""
+            print(f"  {label:<12} {val:.3f}  weight {w[label]:.2f}"
+                  + ("" if used else "  -- not evaluated, excluded from the average") + extra)
+
+        if exp.signals.get("code_match"):
+            print("  model code match: +0.12 bonus")
+        if exp.signals.get("code_conflict"):
+            print("  model code conflict: score x0.75 penalty")
+
+        base = exp.signals.get("base")
+        if base is not None:
+            print(f"\n  weighted average (base): {base:.3f}")
+            if exp.signals["image"] >= 0.85:
+                print("  strong_image rule applies (image >= 0.85): final score is "
+                      "floored against title/spec agreement, not just the average")
+        print(f"  final score: {exp.score:.3f}")
+
+        print()
+        print(f"thresholds: review >= {engine.review_threshold:.2f}  "
+              f"auto-merge >= {engine.auto_threshold:.2f}")
+        verdict = {
+            "weighted": "would AUTO-MERGE",
+            "review": "would go to the REVIEW QUEUE",
+            "below_threshold": "would NOT merge",
+            "blocked": "blocked by a prior human rejection",
+        }.get(exp.method, exp.method)
+        print(f"verdict: {verdict}")
     return 0
 
 
@@ -881,6 +1157,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="ignore sites that need a forwarding agent")
     w.add_argument("--restock", action="store_true",
                    help="alert when the product comes back in stock, not on price")
+    w.add_argument("--new-site", dest="new_site", action="store_true",
+                   help="alert when a site that didn't already sell this starts to")
     w.add_argument("--webhook", help="POST alerts here (Slack/Discord compatible)")
     w.add_argument("--no-notify", action="store_true", help="check without delivering")
     w.set_defaults(func=cmd_watch)
@@ -905,6 +1183,17 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("--limit", type=int, default=15)
     im.set_defaults(func=cmd_image_search)
 
+    aa = sub.add_parser(
+        "agent-auth",
+        help="set up and verify a forwarding-agent API key for 1688/taobao/tmall",
+    )
+    aa.add_argument("--preset", default="otapi", help="a preset name from providers.yaml")
+    aa.add_argument("--key", help="the API key/instanceKey the provider issued you")
+    aa.add_argument("--base-url", help="override the preset's base_url (agent_lookup/custom)")
+    aa.add_argument("--site", help="comma-separated sites to verify (default: all the preset covers)")
+    aa.add_argument("--list", action="store_true", help="list available presets and exit")
+    aa.set_defaults(func=cmd_agent_auth)
+
     pp = sub.add_parser(
         "provider-probe",
         help="test a providers.yaml preset and show what the mapping extracted",
@@ -918,6 +1207,14 @@ def build_parser() -> argparse.ArgumentParser:
     m = sub.add_parser("rematch", help="retry matching on unmatched listings")
     m.add_argument("--limit", type=int, default=2000)
     m.set_defaults(func=cmd_rematch)
+
+    me = sub.add_parser(
+        "match-explain",
+        help="show why (or why not) two products' offers would merge",
+    )
+    me.add_argument("product_a", help="product slug or id (its first active offer is scored)")
+    me.add_argument("product_b", help="product slug or id (the comparison target)")
+    me.set_defaults(func=cmd_match_explain)
 
     sub.add_parser("recategorize", help="reclassify every product").set_defaults(
         func=cmd_recategorize)

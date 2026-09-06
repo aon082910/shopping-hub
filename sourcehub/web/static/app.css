@@ -142,6 +142,12 @@ a:hover { text-decoration: underline; }
   color: var(--ink-soft); font-size: 12px;
 }
 .noimg-lg { aspect-ratio: 1; border-radius: var(--radius); background: var(--quiet-bg); }
+
+.review-pair { display: flex; align-items: center; gap: 8px; }
+.review-thumb {
+  width: 44px; height: 44px; flex: none; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--quiet-bg);
+}
 .badge-save {
   position: absolute; top: 8px; left: 8px; background: var(--ok-bg); color: var(--ok-ink);
   font-size: 11.5px; font-weight: 650; padding: 3px 8px; border-radius: 999px;
@@ -224,6 +230,23 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .orig summary, .tiers summary { cursor: pointer; }
 .minitable { margin-top: 4px; font-size: 12px; }
 .minitable td { padding: 1px 8px 1px 0; border: 0; }
+
+.variant-picker { margin-top: 6px; }
+.variant-thumb {
+  display: block; width: 36px; height: 36px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--line); margin-bottom: 4px;
+}
+.variant-group { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 3px; }
+.variant-label { font-size: 11px; color: var(--ink-soft); margin-right: 2px; }
+.variant-btn {
+  font: inherit; font-size: 11.5px; line-height: 1; padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--panel);
+  color: var(--ink); cursor: pointer;
+}
+.variant-btn:hover { border-color: var(--accent); }
+.variant-btn.selected { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.variant-status { font-size: 11.5px; color: var(--ink-soft); margin-top: 2px; }
+.variant-status.is-soldout { color: var(--warn-ink); }
 .specs th { width: 32%; background: var(--quiet-bg); font-weight: 600; }
 
 .agent-row td { background: var(--warn-bg); }

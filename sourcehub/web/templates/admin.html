@@ -24,10 +24,22 @@
       <tr>
         <td class="num"><b>{{ r.score }}</b></td>
         <td>
-          <div class="muted small">{{ r.offer_site }}</div>
-          <a href="{{ r.offer_url }}" target="_blank" rel="noopener nofollow">{{ r.offer_title }}</a>
+          <div class="review-pair">
+            {% if r.offer_image %}<img class="review-thumb" src="{{ r.offer_image }}" alt="">
+            {% else %}<div class="review-thumb noimg"></div>{% endif %}
+            <div>
+              <div class="muted small">{{ r.offer_site }}</div>
+              <a href="{{ r.offer_url }}" target="_blank" rel="noopener nofollow">{{ r.offer_title }}</a>
+            </div>
+          </div>
         </td>
-        <td><a href="/product/{{ r.product_slug }}">{{ r.product_title }}</a></td>
+        <td>
+          <div class="review-pair">
+            {% if r.product_image %}<img class="review-thumb" src="{{ r.product_image }}" alt="">
+            {% else %}<div class="review-thumb noimg"></div>{% endif %}
+            <a href="/product/{{ r.product_slug }}">{{ r.product_title }}</a>
+          </div>
+        </td>
         <td class="small">
           {% for k, v in r.signals.items() %}<span class="chip chip-quiet">{{ k }}: {{ v }}</span>{% endfor %}
         </td>
