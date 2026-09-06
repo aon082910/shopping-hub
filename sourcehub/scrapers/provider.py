@@ -13,7 +13,7 @@ vendor you sign up for is a YAML edit, not a code change. Use
 
 to dump a real response and see exactly what the mapping extracted from it.
 
-Two things worth knowing before you wire one up:
+Three things worth knowing before you wire one up:
 
 * **Most forwarding agents do item lookup only.** They resolve a URL or item id you
   already have; they do not offer keyword search over the catalog. That enriches a
@@ -22,6 +22,13 @@ Two things worth knowing before you wire one up:
 * **Be polite.** Agent sites are small businesses giving this away as a side effect
   of their checkout flow. The per-host rate limiter applies here as everywhere, and
   the defaults are deliberately slow.
+* **Some agents gate real results behind a login.** Logged out, an agent's own
+  "buy this link" tool can return a teaser rather than what a signed-in customer
+  would actually see. A preset can set ``via_agent_login: <agent key>`` to route
+  its calls through a real browser bound to that agent's own persisted session
+  (``python -m sourcehub.cli agent-login --agent <key>``, once) instead of the
+  plain anonymous ``Fetcher`` -- GET only, and it degrades to the same anonymous
+  access when no login has been done yet, rather than failing.
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Iterator, Optional
+from urllib.parse import urlencode
 
 import yaml
 
@@ -250,6 +258,27 @@ class ProviderClient:
 
         url = self.base_url + path
         method = str(spec.get("method", "GET")).upper()
+
+        agent_key = self.preset.get("via_agent_login")
+        if agent_key:
+            # Some agents show real pricing/results only to a signed-in account;
+            # a plain HTTP client has no session at all and can never reach that.
+            # Routes through a real browser bound to the profile `agent-login`
+            # set up, so the fetch actually carries that login's cookies. GET
+            # only -- an agent's own lookup endpoint is what this exists for,
+            # and that's what agent_lookup declares.
+            if method != "GET":
+                raise ProviderError(
+                    f"provider {self.preset_name!r} sets via_agent_login but its "
+                    f"{section!r} section uses {method}; only GET is supported "
+                    f"through an agent's browser session"
+                )
+            from ..agents import agent_browser_session
+
+            full_url = url + ("?" + urlencode(params) if params else "")
+            with agent_browser_session(agent_key) as session:
+                return session.fetch_json(full_url, referer=self.base_url, headers=headers)
+
         if method == "POST":
             resp = self.fetcher.post(url, json_body=_expand(spec.get("body"), ctx),
                                      headers=headers)

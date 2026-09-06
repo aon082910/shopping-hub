@@ -180,6 +180,46 @@ def cmd_browser_login(args) -> int:
     return 0
 
 
+def cmd_agent_login(args) -> int:
+    """One-time interactive login to a forwarding agent's own site.
+
+    1688/Taobao/Tmall themselves only need a login to be *crawled* at all
+    (browser-login covers that). This is a different account on a different
+    domain: the forwarding agent's own site, which some agents gate real
+    pricing and full search behind -- what you get logged out is a teaser, not
+    the number a human buying through them would actually see. Saved to its
+    own persistent profile (not shared with the site-login one, or with any
+    other agent), so a headless run can reuse it via
+    ``agents.agent_browser_session(agent_key)``.
+    """
+    from .db.seed import AGENTS
+    from .util.browser import interactive_login
+
+    by_key = {a["key"]: a for a in AGENTS if a["key"] != "direct"}
+    if args.list:
+        print("Forwarding agents:\n")
+        for key, spec in by_key.items():
+            print(f"  {key:<10} {spec['name']:<12} {spec['home_url']}")
+        return 0
+
+    if not args.agent:
+        print("Usage: agent-login --agent <key>  (--list to see the known agents)")
+        return 1
+
+    spec = by_key.get(args.agent)
+    if spec is None:
+        print(f"unknown agent {args.agent!r}. Known: {', '.join(sorted(by_key))}")
+        return 1
+
+    profile = get_settings().agent_profile_path(args.agent)
+    print(f"Opening {spec['home_url']} for a one-time login to {spec['name']}...")
+    print(f"(profile: {profile})")
+    interactive_login(spec["home_url"], profile_dir=str(profile))
+    print("Session saved. Anything reading this agent's own site through "
+          "agent_browser_session() will reuse it.")
+    return 0
+
+
 def cmd_selftest(args) -> int:
     """Fetch a couple of pages per adapter and report what parsed.
 
@@ -1130,6 +1170,14 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("browser-login", help="one-time login for taobao/tmall/1688")
     b.add_argument("--site", required=True, choices=["taobao", "tmall", "1688"])
     b.set_defaults(func=cmd_browser_login)
+
+    al = sub.add_parser(
+        "agent-login",
+        help="one-time login to a forwarding agent's own site (superbuy, cssbuy, ...)",
+    )
+    al.add_argument("--agent", help="agent key -- see --list")
+    al.add_argument("--list", action="store_true", help="list known agents and exit")
+    al.set_defaults(func=cmd_agent_login)
 
     t = sub.add_parser("selftest", help="check adapters still parse their sites")
     t.add_argument("--site", help="comma-separated site keys (default: all)")

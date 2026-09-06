@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # browser
     sourcehub_browser_profile: str = str(ROOT / "data" / "browser_profile")
     sourcehub_headless: bool = True
+    # Forwarding agents (superbuy/cssbuy/wegobuy/...) get their own profile
+    # directory, one subfolder per agent, kept separate from the taobao/tmall/1688
+    # site-login profile above -- a different account, on a different domain,
+    # with no reason to share a cookie jar with the source sites.
+    sourcehub_agent_profile_dir: str = str(ROOT / "data" / "agent_profiles")
 
     # agent affiliate ids
     agent_ref_superbuy: str = ""
@@ -112,6 +117,14 @@ class Settings(BaseSettings):
         p = Path(self.sourcehub_browser_profile)
         if not p.is_absolute():
             p = ROOT / p
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def agent_profile_path(self, agent_key: str) -> Path:
+        base = Path(self.sourcehub_agent_profile_dir)
+        if not base.is_absolute():
+            base = ROOT / base
+        p = base / agent_key
         p.mkdir(parents=True, exist_ok=True)
         return p
 

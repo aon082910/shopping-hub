@@ -149,6 +149,22 @@ you already have — they don't search the catalog. That enriches a known produc
 cannot *discover* new ones, so an agent endpoint alone will never populate the
 catalog. The shipped `agent_lookup` preset deliberately has no `search:` section.
 
+**The other catch: some show real results only when you're signed in.** Logged
+out, an agent's own "buy this link" tool can return a teaser rather than what a
+signed-in customer would actually see. One command signs a persistent browser
+profile into an agent's own site:
+
+```bash
+python -m sourcehub.cli agent-login --agent cssbuy
+```
+
+A real Chromium window opens on the agent's own site; log in by hand once (own
+profile, separate from the taobao/tmall/1688 site-login one — a different
+account on a different domain). `--list` shows the known agent keys. Set
+`via_agent_login: cssbuy` on a preset in `providers.yaml` and its calls route
+through that login's cookies instead of an anonymous request; without a prior
+login it's simply a logged-out profile, same as today.
+
 ### Hybrid mode
 
 Crawling is two jobs with very different costs, so they're configured separately.
@@ -388,6 +404,7 @@ refresh          re-price known listings      --sites --older-than --limit
 serve            web UI                       --host --port --reload
 schedule         run the background scheduler
 browser-login    one-time login for taobao/tmall/1688
+agent-login      one-time login to a forwarding agent's own site   --agent --list
 agent-auth       set up + verify a forwarding-agent API key   --preset --key --base-url --site --list
 provider-probe   test a providers.yaml preset      --preset --site --keyword --list
 rematch          retry matching on unmatched listings

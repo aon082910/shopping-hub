@@ -179,9 +179,17 @@ providers:
   # DevTools > Network, paste a Taobao URL, and look at the XHR the page fires.
   # Copy its URL into `path`, its query params into `params`, and use
   # provider-probe to nail down the field paths.
+  #
+  # If the agent shows fuller results (or real pricing) only when signed in, set
+  #   via_agent_login: cssbuy        # an agent key from db/seed.py's AGENTS list
+  # and run `python -m sourcehub.cli agent-login --agent cssbuy` once first. Calls
+  # then go through a real browser carrying that login's cookies instead of the
+  # plain anonymous Fetcher (GET only). Omit it, or skip the login, and this
+  # behaves exactly as before -- anonymous access, same as today.
   # ---------------------------------------------------------------------------
   agent_lookup:
     base_url: "${CN_PROVIDER_BASE_URL}"
+    # via_agent_login: cssbuy
     auth:
       mode: none
 

@@ -104,6 +104,27 @@ BUILDERS = {
 }
 
 
+def agent_browser_session(agent_key: str):
+    """A :class:`BrowserSession` bound to one forwarding agent's own persisted
+    login profile, set up once with ``python -m sourcehub.cli agent-login
+    --agent <key>``.
+
+    Why this needs to exist at all: some agents show real pricing, full search
+    results, or deal listings only to a signed-in account -- logged out, their
+    "buy this link" tool gives a teaser, not what a human buying through them
+    would actually see. The plain :class:`~..util.http.Fetcher` used everywhere
+    else in this project has no session at all, so it can never reach that.
+
+    Without a prior ``agent-login``, this is simply a fresh, logged-out browser
+    profile -- it degrades to the same anonymous access the HTTP path already
+    has, not an error.
+    """
+    from .config import get_settings
+    from .util.browser import BrowserSession
+
+    return BrowserSession(profile_dir=str(get_settings().agent_profile_path(agent_key)))
+
+
 # ------------------------------------------------------------------- public API
 
 

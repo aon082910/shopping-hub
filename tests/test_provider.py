@@ -382,10 +382,93 @@ def test_hybrid_detail_flow():
     check_true("no browser was ever started", adapter._browser is None)
 
 
+# ------------------------------------------------------- via_agent_login routing
+
+
+class _FakeAgentSession:
+    """Stands in for BrowserSession: no real Playwright/browser in this test."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls: list[dict] = []
+        self.started = False
+        self.closed = False
+
+    def start(self):
+        self.started = True
+        return self
+
+    def close(self):
+        self.closed = True
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def fetch_json(self, url, *, referer=None, headers=None):
+        self.calls.append({"url": url, "referer": referer, "headers": headers or {}})
+        return self.payload
+
+
+def test_via_agent_login_routes_through_a_browser_session():
+    print("\nvia_agent_login")
+    import sourcehub.agents as agents_module
+
+    # agent_lookup's detail_path is ["data", "result", "item"] -- a list of
+    # candidate *full* paths (first hit wins), not one dotted chain, so the node
+    # the mapper reads must sit directly under one of those top-level keys.
+    fake = _FakeAgentSession(
+        {"item": {"itemId": "123456", "itemName": "Signed-in Only Gadget"}}
+    )
+    unused_fetcher = FakeFetcher({})
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: fake
+    try:
+        client = ProviderClient("agent_lookup", "taobao", unused_fetcher,
+                                base_url="https://example.test")
+        # Instance-only override -- never mutate the shared preset cache other
+        # tests (and the real app) read from.
+        client.preset = {**client.preset, "via_agent_login": "cssbuy"}
+
+        offer = client.detail("123456", url="https://item.taobao.com/item.htm?id=123456")
+        check_true("the plain Fetcher was never touched", not unused_fetcher.last)
+        check("exactly one call went through the agent session", len(fake.calls), 1)
+        check_true("browser session was started", fake.started)
+        check_true("browser session was closed after the call", fake.closed)
+        check_true("mapped using the signed-in-only response",
+                  offer is not None and offer.title == "Signed-in Only Gadget")
+
+        # POST is refused outright rather than silently going through the plain
+        # Fetcher (which would defeat the point) or being sent anonymously.
+        post_client = ProviderClient("agent_lookup", "taobao", FakeFetcher({}),
+                                     base_url="https://example.test")
+        post_client.preset = {
+            **post_client.preset,
+            "via_agent_login": "cssbuy",
+            "detail": {**post_client.preset["detail"], "method": "POST"},
+        }
+        try:
+            post_client.call("detail", {"id": "1", "url": ""})
+            check("POST through an agent session is refused", False, True)
+        except ProviderError as e:
+            check_true("POST refusal names the reason", "only GET is supported" in str(e))
+    finally:
+        agents_module.agent_browser_session = original
+
+    print("\nwithout via_agent_login, nothing changes -- plain Fetcher still used")
+    fetcher = FakeFetcher({"item": {"itemName": "Anonymous Gadget"}})
+    plain_client = ProviderClient("agent_lookup", "taobao", fetcher,
+                                  base_url="https://example.test")
+    plain_client.detail("1", url="https://item.taobao.com/item.htm?id=1")
+    check_true("the plain fetcher recorded the call", bool(fetcher.last))
+
+
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_driver_resolution,
-               test_hybrid_detail_flow):
+               test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session):
         fn()
     print("\n" + "=" * 62)
     if FAILS:

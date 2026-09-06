@@ -282,20 +282,24 @@ class BrowserSession:
                 del combo["cols"]
             return combos
 
-    def fetch_json(self, url: str, *, referer: str | None = None) -> object:
+    def fetch_json(
+        self, url: str, *, referer: str | None = None, headers: dict[str, str] | None = None,
+    ) -> object:
         """Call a site's own XHR endpoint from inside the page, so cookies and
-        anti-bot tokens are attached by the browser itself."""
+        anti-bot tokens (and, for a profile set up via ``agent-login``, a real
+        logged-in session) are attached by the browser itself rather than by a
+        plain HTTP client that was never signed in to anything."""
         with self.page() as pg:
             if referer:
                 pg.goto(referer, wait_until="domcontentloaded")
                 self._assert_not_blocked(pg)
             return pg.evaluate(
-                """async (u) => {
-                    const r = await fetch(u, {credentials: 'include'});
+                """async ([u, h]) => {
+                    const r = await fetch(u, {credentials: 'include', headers: h || {}});
                     const t = await r.text();
                     try { return JSON.parse(t); } catch (e) { return {__raw: t}; }
                 }""",
-                url,
+                [url, headers or {}],
             )
 
     def _assert_not_blocked(self, pg) -> None:
