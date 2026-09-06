@@ -30,6 +30,13 @@ sites:
     render_detail: browser
     delay_seconds: 3.0
     concurrency: 2
+    # Colour/size/length pickers only exist as DOM elements now -- AliExpress's
+    # own runParams blob ships empty (isCSR: true), so per-SKU price and stock
+    # only exist as a client-side update triggered by an actual click. This
+    # clicks through every option combination on listings that have a picker at
+    # all (most don't pay this cost). Set false if crawl time matters more than
+    # per-variant pricing on this site.
+    extract_variants: true
     ships_from_us_warehouse: true
 
   alibaba:
@@ -116,6 +123,15 @@ sites:
     # way the adapter returns anything.
     render: browser
     delay_seconds: 2.0
+    concurrency: 2
+
+  # Second US retail baseline: new, first-party inventory at a fixed price,
+  # unlike eBay's mix of auctions and used lots. Pure API, no HTML fallback --
+  # needs a free BESTBUY_API_KEY (https://developer.bestbuy.com), else skipped
+  # entirely like octopart without Nexar credentials.
+  bestbuy:
+    enabled: true
+    delay_seconds: 1.0
     concurrency: 2
 
   # Component distributors. These publish real manufacturer part numbers, so

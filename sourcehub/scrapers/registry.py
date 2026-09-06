@@ -10,6 +10,7 @@ def _load() -> dict[str, Type[SiteAdapter]]:
     from .aliexpress import AliExpressAdapter
     from .alibaba import AlibabaAdapter
     from .banggood import BanggoodAdapter, GearBestAdapter
+    from .bestbuy import BestBuyAdapter
     from .chinavasion import ChinavasionAdapter
     from .components import LcscAdapter, OctopartAdapter
     from .dhgate import DHgateAdapter
@@ -23,7 +24,7 @@ def _load() -> dict[str, Type[SiteAdapter]]:
         AliExpressAdapter, AlibabaAdapter, Alibaba1688Adapter, TaobaoAdapter,
         TmallAdapter, DHgateAdapter, ChinavasionAdapter, GlobalSourcesAdapter,
         MadeInChinaAdapter, GearBestAdapter, BanggoodAdapter, EbayAdapter,
-        LcscAdapter, OctopartAdapter, TomtopAdapter, GeekbuyingAdapter,
+        BestBuyAdapter, LcscAdapter, OctopartAdapter, TomtopAdapter, GeekbuyingAdapter,
     ]
     return {c.key: c for c in classes}
 

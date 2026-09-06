@@ -9,7 +9,7 @@ Four things make this safe to wire to a public search box:
   milliseconds. The search returns what is already in the database and the crawl
   happens behind it.
 * **One worker, serially.** Ten people searching ten things does not mean ten
-  simultaneous crawls across eleven marketplaces. It means a queue.
+  simultaneous crawls across seventeen marketplaces. It means a queue.
 * **A persisted cooldown.** The same keyword is not re-crawled for
   `cooldown_hours`, no matter how many times it is searched or how often the
   process restarts.

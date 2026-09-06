@@ -115,6 +115,17 @@ SITES = [
         "cheaper than buying domestically, not as a bulk sourcing option.",
     ),
     dict(
+        key="bestbuy",
+        name="Best Buy",
+        base_url="https://www.bestbuy.com",
+        home_currency="USD",
+        default_language="en",
+        is_baseline=True,
+        notes="Second US retail baseline: new, first-party inventory at a fixed "
+        "price, unlike eBay's mix of auctions and used lots. Needs a free "
+        "BESTBUY_API_KEY, else the adapter is skipped.",
+    ),
+    dict(
         key="lcsc",
         name="LCSC",
         base_url="https://www.lcsc.com",
