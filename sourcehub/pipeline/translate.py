@@ -10,9 +10,14 @@ Design points that matter in practice:
   and asks for a JSON array back.
 * **Nothing is destroyed.** Raw text is always retained on the offer; the English
   version is written to a parallel ``*_en`` column.
-* **Graceful degradation.** With no provider configured the pipeline still runs --
-  ``*_en`` simply falls back to the raw string, and English-language sites are
-  unaffected either way.
+* **Graceful degradation.** With no provider configured (``TRANSLATE_PROVIDER=none``,
+  chosen deliberately) the pipeline still runs -- ``*_en`` simply falls back to the
+  raw string, and English-language sites are unaffected either way. A *configured*
+  provider that is merely unreachable right now (missing key, rate limit, an
+  outage) is different: that batch automatically retries once against
+  ``google_free`` -- no key, no signup -- rather than leaving CN/EN title matching
+  dead for the whole run. The cache attributes each entry to whichever provider
+  actually produced it, not the one that failed.
 """
 
 from __future__ import annotations
@@ -106,16 +111,32 @@ class Translator:
         batch_size = 40
         for start in range(0, len(unique), batch_size):
             chunk = unique[start : start + batch_size]
+            used_provider = self.provider
             try:
                 translated = self._call_provider(chunk, src_lang)
             except Exception as e:
                 log.warning("translation batch failed (%s): %s", self.provider, e)
-                translated = chunk  # fall back to source text
+                # google_free needs no key and no signup, so a configured provider
+                # that is merely unreachable right now (missing key, rate limit,
+                # an outage) doesn't have to mean this batch goes untranslated --
+                # only an *explicit* TRANSLATE_PROVIDER=none should mean that, and
+                # that case already returned above without reaching here at all.
+                if self.provider != "google_free":
+                    try:
+                        translated = self._google_free(chunk, src_lang)
+                        used_provider = "google_free"
+                        log.info("translation fell back to google_free for %d string(s) "
+                                 "(%s unavailable)", len(chunk), self.provider)
+                    except Exception as e2:
+                        log.debug("google_free fallback also failed: %s", e2)
+                        translated = chunk
+                else:
+                    translated = chunk
             for src, dst in zip(chunk, translated):
                 dst = clean(dst) or src
-                key = self._cache_key(src)
+                key = self._cache_key(src, provider=used_provider)
                 self._mem[key] = dst
-                self._cache_put(key, src, dst)
+                self._cache_put(key, src, dst, provider=used_provider)
                 for i in pending[src]:
                     results[i] = dst
 
@@ -159,14 +180,14 @@ class Translator:
 
     # ------------------------------------------------------------------ cache
 
-    def _cache_key(self, text: str) -> str:
-        return hash_key(self.provider, text)
+    def _cache_key(self, text: str, provider: str | None = None) -> str:
+        return hash_key(provider or self.provider, text)
 
     def _cache_get(self, key: str) -> str | None:
         row = self.session.scalar(select(Translation).where(Translation.key_hash == key))
         return row.dst_text if row else None
 
-    def _cache_put(self, key: str, src: str, dst: str) -> None:
+    def _cache_put(self, key: str, src: str, dst: str, provider: str | None = None) -> None:
         if self.session.scalar(select(Translation.id).where(Translation.key_hash == key)):
             return
         self.session.add(
@@ -175,7 +196,7 @@ class Translator:
                 src_lang=detect_lang(src),
                 src_text=src[:20000],
                 dst_text=dst[:20000],
-                provider=self.provider,
+                provider=provider or self.provider,
             )
         )
 
