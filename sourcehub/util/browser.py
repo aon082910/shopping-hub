@@ -49,6 +49,34 @@ class BrowserUnavailable(RuntimeError):
     pass
 
 
+def sku_combinations(
+    row_options: list[list[dict]], row_names: list[str], max_combinations: int,
+) -> list[dict]:
+    """Cross the option rows a SKU picker exposed into the combinations to price.
+
+    Pure and Playwright-free on purpose: this is the part of variant extraction
+    that has actual logic to get wrong (bounding a combinatorial explosion,
+    aggregating "any option in this combo is sold out", picking which option's
+    photo represents the combo) -- the surrounding click-and-read loop is just
+    I/O. Each row's options come as ``{"col", "label", "sold_out", "image"}``.
+    """
+    if not row_options:
+        return []
+    import itertools
+
+    combos = list(itertools.product(*row_options))[:max_combinations]
+    return [
+        {
+            "attrs": {row_names[i]: opt["label"] for i, opt in enumerate(combo)},
+            "sku": "|".join(opt["col"] for opt in combo),
+            "cols": [opt["col"] for opt in combo],
+            "sold_out": any(opt["sold_out"] for opt in combo),
+            "image": next((opt["image"] for opt in combo if opt["image"]), None),
+        }
+        for combo in combos
+    ]
+
+
 class BrowserSession:
     """Thin wrapper over a persistent Playwright context."""
 
@@ -178,6 +206,81 @@ class BrowserSession:
             pg.wait_for_timeout(wait_ms)
             self._assert_not_blocked(pg)
             return pg.content()
+
+    def get_sku_variants(
+        self, url: str, *, max_combinations: int = 16, timeout_ms: int = 45000,
+    ) -> list[dict]:
+        """Click through a product's colour/size/length picker, reading back the
+        price and stock state the page shows for each combination.
+
+        Written for AliExpress, whose product page ships no per-SKU data at all any
+        more -- ``window.runParams`` is a literal ``{}`` at parse time (the page sets
+        ``isCSR: true`` and fetches everything after load). The picker itself still
+        renders as ordinary DOM elements (``[data-sku-row]`` / ``[data-sku-col]``),
+        so the only way left to learn what the 100ft version of a listing costs is
+        to actually click it, the same as a shopper would, and read what changed.
+
+        Returns ``[]`` immediately, with no clicking, for the common case of a
+        listing that has no SKU picker at all.
+        """
+        with self.page() as pg:
+            pg.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            self._assert_not_blocked(pg)
+            pg.wait_for_timeout(1500)  # let the CSR shell finish hydrating
+
+            rows = pg.locator("[data-sku-row]")
+            row_count = rows.count()
+            if row_count == 0:
+                return []
+
+            row_options: list[list[dict]] = []
+            row_names: list[str] = []
+            for i in range(row_count):
+                row = rows.nth(i)
+                options = []
+                cols = row.locator("[data-sku-col]")
+                for j in range(cols.count()):
+                    opt = cols.nth(j)
+                    col = opt.get_attribute("data-sku-col")
+                    if not col:
+                        continue
+                    label = (opt.get_attribute("title") or opt.inner_text() or "").strip()
+                    if not label:
+                        continue
+                    cls = opt.get_attribute("class") or ""
+                    img = opt.locator("img").first
+                    img_url = img.get_attribute("src") if img.count() else None
+                    options.append({
+                        "col": col, "label": label,
+                        "sold_out": "soldOut" in cls, "image": img_url,
+                    })
+                if not options:
+                    continue
+                row_options.append(options)
+
+                wrap = row.locator("xpath=ancestor::*[contains(@class,'sku-item--wrap')]").first
+                title_el = wrap.locator(
+                    "[class*='sku-item--title'], [class*='sku-item--property']"
+                ).first
+                text = title_el.inner_text().strip() if wrap.count() and title_el.count() else ""
+                row_names.append(text.split(":")[0].strip() or f"Option {len(row_names) + 1}")
+
+            combos = sku_combinations(row_options, row_names, max_combinations)
+            if not combos:
+                return []
+
+            price_sel = "[class*='price-default--current'], [class*='price--current']"
+            for combo in combos:
+                for col in combo["cols"]:
+                    try:
+                        pg.locator(f"[data-sku-col='{col}']").first.click(timeout=3000)
+                        pg.wait_for_timeout(350)
+                    except Exception as e:
+                        log.debug("sku click failed for %s on %s: %s", col, url, e)
+                price_el = pg.locator(price_sel).first
+                combo["price_text"] = price_el.inner_text() if price_el.count() else None
+                del combo["cols"]
+            return combos
 
     def fetch_json(self, url: str, *, referer: str | None = None) -> object:
         """Call a site's own XHR endpoint from inside the page, so cookies and

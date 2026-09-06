@@ -199,8 +199,37 @@ class AliExpressAdapter(SiteAdapter):
         if not offer.specs or not offer.image_urls:
             self._detail_from_dom(offer, body)
 
+        if self.site_cfg.get("extract_variants", True) and self.render_mode_for("detail") == "browser":
+            self._detail_variants(offer)
+
         offer.detail_fetched = True
         return offer
+
+    def _detail_variants(self, offer: RawOffer) -> None:
+        """Colour/size/length options, read by clicking the SKU picker directly.
+
+        There is nowhere left to parse this from statically: the page ships with
+        ``window.runParams`` as a literal ``{}`` (see ``BrowserSession.get_sku_variants``
+        for why), so every per-SKU price on this site now only exists as a DOM
+        update triggered by a real click. ``extract_variants: false`` in
+        config.yaml skips this -- it costs one extra page interaction per listing
+        that actually has options, which is not free on a large crawl.
+        """
+        try:
+            raw_variants = self.browser.get_sku_variants(offer.url)
+        except Exception as e:
+            log.debug("[aliexpress] sku variant extraction failed for %s: %s", offer.url, e)
+            return
+        for v in raw_variants:
+            price_min, _, ccy = parse_price(v.get("price_text"), offer.currency)
+            name = ", ".join(f"{k}: {val}" for k, val in v["attrs"].items())
+            offer.add_variant(
+                sku=v["sku"], name=name or v["sku"],
+                price=price_min, currency=ccy,
+                attrs=v["attrs"],
+                in_stock=not v.get("sold_out", False),
+                image_url=v.get("image"),
+            )
 
     def _detail_from_json(self, offer: RawOffer, data: dict) -> None:
         info = data.get("productInfoComponent") or {}
