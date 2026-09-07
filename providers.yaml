@@ -319,6 +319,19 @@ providers:
           list: ["propertiesVOList", "properties"]
           key: ["name", "key"]
           value: ["value"]
+        # A SKU (skuList) never carries its own option names -- it references
+        # them as opaque "propId:valueId" pairs, which must be cross-referenced
+        # against the separate top-level `properties` array to get human-
+        # readable names. Standard across the whole Taobao/Tmall/1688 family,
+        # not USFans-specific -- see ProviderClient._variant_attrs().
+        variants:
+          list: ["skuList"]
+          sku: ["skuId"]
+          price: ["price"]
+          stock: ["stock"]
+          image: ["imgUrl"]
+          value_ref: "valueIds"
+          properties_list: "properties"
 
   # ---------------------------------------------------------------------------
   # Blank template. Copy, rename, fill in, probe.

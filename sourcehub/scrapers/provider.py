@@ -454,6 +454,37 @@ class ProviderClient:
             offer.price_min = min(t.price for t in offer.tiers)
             offer.price_max = max(t.price for t in offer.tiers)
 
+        variants_map = f.get("variants") or {}
+        for node in as_list(dig(item, variants_map.get("list"))):
+            if not isinstance(node, dict):
+                continue
+            sku = str(dig(node, variants_map.get("sku")) or "")
+            if not sku:
+                continue
+            v_price = as_float(dig(node, variants_map.get("price")))
+            v_stock = as_int(dig(node, variants_map.get("stock"))) if variants_map.get("stock") else None
+            v_image = _https(str(dig(node, variants_map.get("image")) or "")) or None
+            attrs = self._variant_attrs(item, node, variants_map)
+            offer.add_variant(
+                sku=sku,
+                name=", ".join(f"{k}: {v}" for k, v in attrs.items()) or sku,
+                price=v_price,
+                currency=offer.currency,
+                attrs=attrs,
+                stock=v_stock,
+                in_stock=(v_stock > 0) if v_stock is not None else True,
+                image_url=v_image,
+            )
+        if offer.variants:
+            # A multi-SKU listing's own top-level price is routinely 0 or absent
+            # (confirmed live, USFans/Taobao) -- the real range lives per-SKU.
+            priced = [v.price for v in offer.variants if v.price]
+            if priced:
+                if not offer.price_min:
+                    offer.price_min = min(priced)
+                if not offer.price_max:
+                    offer.price_max = max(priced)
+
         # These three sites never ship internationally, whatever the provider says.
         offer.fees_note = (
             "Domestic-China listing sourced via an API provider. International "
@@ -461,6 +492,55 @@ class ProviderClient:
             "forwarding agent, not by the marketplace."
         )
         return offer
+
+    @staticmethod
+    def _variant_attrs(item: dict, sku_node: dict, variants_map: dict) -> dict[str, str]:
+        """Human-readable {Color: Black, Size: M} for one SKU.
+
+        Confirmed live (Taobao via USFans, and this shape is standard across the
+        whole Taobao/Tmall/1688 family, not USFans-specific): a SKU never carries
+        its own option names -- it references them as opaque "propId:valueId"
+        pairs (``valueIds``) into a *separate*, top-level list of property
+        definitions. Without cross-referencing that list, a variant would be
+        addressable (the id is real) but unreadable (no way to show a shopper
+        which one is "black" and which is "M").
+        """
+        ref_field = variants_map.get("value_ref")
+        props_path = variants_map.get("properties_list")
+        if not ref_field or not props_path:
+            return {}
+
+        lookup: dict[str, tuple[str, str]] = {}
+        for group in as_list(dig(item, props_path)):
+            if not isinstance(group, dict):
+                continue
+            prop_name = str(
+                group.get(variants_map.get("prop_name_en_key", "propNameEn"))
+                or group.get(variants_map.get("prop_name_key", "propName"), "")
+                or ""
+            )
+            for value in group.get(variants_map.get("prop_values_key", "valuesList"), []) or []:
+                if not isinstance(value, dict):
+                    continue
+                vid = str(value.get(variants_map.get("value_id_key", "valueId"), ""))
+                vname = str(
+                    value.get(variants_map.get("value_name_en_key", "valueNameEn"))
+                    or value.get(variants_map.get("value_name_key", "valueName"), "")
+                    or ""
+                )
+                if vid and vname:
+                    lookup[vid] = (prop_name, vname)
+
+        attrs: dict[str, str] = {}
+        for ref in dig(sku_node, ref_field) or []:
+            # Each ref is "propId:valueId" -- only the valueId half is a key
+            # into the lookup above; propId is redundant with it there.
+            vid = str(ref).split(":")[-1]
+            if vid in lookup:
+                pname, vname = lookup[vid]
+                if pname:
+                    attrs[pname] = vname
+        return attrs
 
 
 def _https(url: str) -> str:

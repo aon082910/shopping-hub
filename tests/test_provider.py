@@ -661,13 +661,85 @@ def test_usfans_detailurl_populated_but_wrong_is_not_trusted():
         agents_module.agent_browser_session = original
 
 
+def test_usfans_multi_sku_variants_map_to_readable_attrs():
+    """The full skuList -> RawVariant mapping, against a trimmed-but-real
+    multi-SKU jacket listing (Color x Size) pasted from an actual logged-in
+    USFans session. skuList entries only carry opaque "propId:valueId"
+    references via valueIds -- the human-readable names live in the separate
+    top-level `properties` array and have to be cross-referenced by id.
+    """
+    print("\nusfans: a real multi-SKU jacket (Color x Size) maps to readable variants")
+    import sourcehub.agents as agents_module
+
+    resolve_fetcher = FakeFetcher(
+        {"code": 200, "data": {"itemNo": "opaque-jacket-token"}, "success": True}
+    )
+    detail_session = _FakeAgentSession(
+        {"code": 200, "success": True, "data": {
+            "goodsId": "opaque-jacket-token",
+            "titleEn": "Men's Casual Jacket",
+            "detailUrl": None,
+            "price": 0, "convertedPrice": 0,
+            "images": ["https://cbu01.alicdn.com/jacket.jpg"],
+            "properties": [
+                {"propId": "1", "propName": "颜色", "propNameEn": "Color",
+                 "valuesList": [
+                     {"valueId": "101", "valueName": "黑色", "valueNameEn": "Black"},
+                     {"valueId": "102", "valueName": "藏青色", "valueNameEn": "Navy"},
+                 ]},
+                {"propId": "2", "propName": "尺码", "propNameEn": "Size",
+                 "valuesList": [
+                     {"valueId": "201", "valueName": "M", "valueNameEn": "M"},
+                     {"valueId": "202", "valueName": "L", "valueNameEn": "L"},
+                 ]},
+            ],
+            "skuList": [
+                {"skuId": "sku-1", "price": 29.9, "stock": 12,
+                 "imgUrl": "https://cbu01.alicdn.com/jacket-black.jpg",
+                 "valueIds": ["1:101", "2:201"]},
+                {"skuId": "sku-2", "price": 31.5, "stock": 0,
+                 "imgUrl": "https://cbu01.alicdn.com/jacket-navy.jpg",
+                 "valueIds": ["1:102", "2:202"]},
+            ],
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: detail_session
+    try:
+        client = ProviderClient("usfans", "taobao", resolve_fetcher,
+                                base_url="https://www.usfans.com")
+        real_url = "https://item.taobao.com/item.htm?id=1075605616467"
+        offer = client.detail("1075605616467", url=real_url)
+        check_true("offer mapped", offer is not None)
+        check("two SKUs mapped to two variants", len(offer.variants), 2)
+
+        v1 = next(v for v in offer.variants if v.sku == "sku-1")
+        check("variant price mapped", v1.price, 29.9)
+        check("variant stock mapped", v1.stock, 12)
+        check("variant image mapped", v1.image_url, "https://cbu01.alicdn.com/jacket-black.jpg")
+        check_true("in-stock variant flagged in_stock", v1.in_stock)
+        check("valueIds resolved to readable English attrs via the properties lookup",
+              v1.attrs, {"Color": "Black", "Size": "M"})
+
+        v2 = next(v for v in offer.variants if v.sku == "sku-2")
+        check_true("zero-stock variant flagged out of stock", not v2.in_stock)
+        check("second variant's attrs also resolved", v2.attrs, {"Color": "Navy", "Size": "L"})
+
+        check("offer.price_min derived from variant prices, not the unset top-level 0",
+              offer.price_min, 29.9)
+        check("offer.price_max derived from variant prices", offer.price_max, 31.5)
+    finally:
+        agents_module.agent_browser_session = original
+
+
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
                test_driver_resolution,
                test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
                test_usfans_resolve_then_detail, test_usfans_multi_sku_item_a_real_login_actually_returned,
-               test_usfans_detailurl_populated_but_wrong_is_not_trusted):
+               test_usfans_detailurl_populated_but_wrong_is_not_trusted,
+               test_usfans_multi_sku_variants_map_to_readable_attrs):
         fn()
     print("\n" + "=" * 62)
     if FAILS:
