@@ -618,12 +618,56 @@ def test_usfans_multi_sku_item_a_real_login_actually_returned():
         agents_module.agent_browser_session = original
 
 
+def test_usfans_detailurl_populated_but_wrong_is_not_trusted():
+    """A second, worse variant of the same real bug: on a later real request,
+    USFans' detailUrl was NOT null -- it was populated with a URL built from
+    its own opaque per-request id substituted for the real Taobao one
+    (https://item.taobao.com/item.htm?id=<the opaque token>). That passes
+    "is it empty" fine, which is exactly why prefer_fallback_url exists for
+    any resolve-based preset: emptiness isn't a reliable enough test that the
+    field is trustworthy.
+    """
+    print("\nusfans: detailUrl is not merely sometimes empty -- it can be "
+          "populated with a wrong URL, which 'is it empty' would miss")
+    import sourcehub.agents as agents_module
+
+    resolve_fetcher = FakeFetcher(
+        {"code": 200, "data": {"itemNo": "AhpZxqim-k6PPakxjhfWgm6RLH8Xs9QvGt4hsKzSFFwFB-V89QLpeHs"},
+         "success": True}
+    )
+    opaque_id = "0xv5eEC5nNOVT7zZ8CkSyTJFfMtC38gTe7AGUjqF6Xe-flVl9FPqhOQ"
+    detail_session = _FakeAgentSession(
+        {"code": 200, "success": True, "data": {
+            "goodsId": "AhpZxqim-k6PPakxjhfWgm6RLH8Xs9QvGt4hsKzSFFwFB-V89QLpeHs",
+            "titleEn": "Car Trunk Storage Box",
+            # Syntactically a perfectly normal-looking Taobao item URL --
+            # semantically wrong, since {id} is USFans' own opaque token.
+            "detailUrl": f"https://item.taobao.com/item.htm?id={opaque_id}",
+            "price": 12.5,
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: detail_session
+    try:
+        client = ProviderClient("usfans", "taobao", resolve_fetcher,
+                                base_url="https://www.usfans.com")
+        real_url = "https://item.taobao.com/item.htm?id=1075605616467"
+        offer = client.detail("1075605616467", url=real_url)
+        check_true("offer mapped", offer is not None)
+        check("the real caller-supplied URL wins over a populated-but-wrong API field",
+              offer.url, real_url)
+        check("a genuinely present price is not discarded by this fix", offer.price_min, 12.5)
+    finally:
+        agents_module.agent_browser_session = original
+
+
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
                test_driver_resolution,
                test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
-               test_usfans_resolve_then_detail, test_usfans_multi_sku_item_a_real_login_actually_returned):
+               test_usfans_resolve_then_detail, test_usfans_multi_sku_item_a_real_login_actually_returned,
+               test_usfans_detailurl_populated_but_wrong_is_not_trusted):
         fn()
     print("\n" + "=" * 62)
     if FAILS:

@@ -1327,6 +1327,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     from .certs import setup_tls
 
+    # This CLI routinely prints untranslated CJK text (raw titles, shop names,
+    # specs) straight from the sites it scrapes -- Chinese by far the most
+    # common. Windows' console encoding defaults to a legacy codepage (cp1252
+    # etc.) depending on locale/terminal, which can't represent most of that
+    # and crashes with a raw UnicodeEncodeError on an ordinary `print()`, not
+    # anything specific to one command. Force UTF-8 defensively rather than
+    # hoping every user's console happens to already be configured for it.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     args = build_parser().parse_args(argv)
     _log(args.verbose)
     setup_tls()   # no-op unless HTTPS interception needs working around

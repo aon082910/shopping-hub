@@ -332,26 +332,38 @@ class ProviderClient:
         if not node:
             return None
         # `url` here is still the real URL this was called with -- resolve only
-        # ever reassigns `item_id`, never `url` -- so it's the right fallback
-        # when the response's own url field is empty or (as with USFans'
-        # opaque goodsId) would reconstruct into a URL that goes nowhere.
-        offer = self.to_offer(node, detail=True, fallback_url=url)
+        # ever reassigns `item_id`, never `url`. When a resolve step exists,
+        # trust it over the API's own returned url field outright: confirmed
+        # live that the API's field is not merely sometimes empty but can be
+        # populated with a URL built from *its own* opaque, per-request id
+        # substituted in place of the source site's real one -- syntactically
+        # a valid-looking URL, semantically pointing nowhere. There is no
+        # resolve-free case where the caller's URL could be less correct.
+        offer = self.to_offer(
+            node, detail=True, fallback_url=url, prefer_fallback_url=bool(resolve_spec),
+        )
         if offer:
             offer.detail_fetched = True
         return offer
 
     def to_offer(
         self, item: dict, detail: bool = False, fallback_url: str = "",
+        prefer_fallback_url: bool = False,
     ) -> Optional[RawOffer]:
         """Map one provider record onto RawOffer using the preset's field paths.
 
         ``fallback_url``: the real URL this lookup was actually called with, if
         the caller has one. Matters specifically for a preset with a ``resolve``
         step (USFans): the id it maps back (``goodsId``) can be an opaque
-        per-request token, not the source site's real item id -- reconstructing
-        a URL from ``item_url_template`` with *that* id produces a URL that goes
-        nowhere. The real URL the lookup started from is always correct; prefer
-        it over guessing when the response's own url field is empty.
+        per-request token, not the source site's real item id.
+
+        ``prefer_fallback_url``: use ``fallback_url`` outright rather than only
+        when the API's own url field is empty. Confirmed live that USFans'
+        ``detailUrl`` is not merely sometimes null -- it can be *populated*
+        with a URL built from that same opaque id substituted for the real
+        one, which is syntactically a fine-looking URL and semantically wrong,
+        so "is it empty" isn't a reliable enough test to fall back on for a
+        resolve-based preset. Callers pass this whenever a resolve step ran.
         """
         f = (self.preset.get("map", {}) or {}).get("item", {}) or {}
         if not isinstance(item, dict):
@@ -382,7 +394,9 @@ class ProviderClient:
         # occasionally relative URLs. Normalize to absolute: this value is stored,
         # linked, and URL-encoded into forwarding-agent deep links, all of which
         # break on a bare "//" prefix.
-        url = _https(str(dig(item, f.get("url"), "") or ""))
+        url = fallback_url if (prefer_fallback_url and fallback_url) else ""
+        if not url:
+            url = _https(str(dig(item, f.get("url"), "") or ""))
         if not url and fallback_url:
             url = fallback_url
         if not url:
@@ -537,7 +551,9 @@ def _probe_detail(client: "ProviderClient", preset_name: str, site_key: str, ite
     node = dig(raw_payload, mapping.get("detail_path")) or raw_payload
     if isinstance(node, list):
         node = node[0] if node else None
-    offer = client.to_offer(node, detail=True, fallback_url=item_url) if node else None
+    offer = client.to_offer(
+        node, detail=True, fallback_url=item_url, prefer_fallback_url=bool(client.preset.get("resolve")),
+    ) if node else None
 
     return {
         "preset": preset_name,
@@ -555,6 +571,11 @@ def _probe_detail(client: "ProviderClient", preset_name: str, site_key: str, ite
         "top_level_keys": sorted(raw_payload.keys()) if isinstance(raw_payload, dict) else type(raw_payload).__name__,
         "detail_path": mapping.get("detail_path"),
         "node_keys": sorted(node.keys()) if isinstance(node, dict) else type(node).__name__ if node else None,
+        # The *values* map.item.* actually pulled out, before to_offer()'s own
+        # fallback logic runs on top of them -- keys/status alone don't
+        # distinguish "field is null" from "field is populated with something
+        # unusable", and those need different fixes.
+        "raw_mapped_fields": _raw_mapped_fields(node, mapping.get("item", {})) if isinstance(node, dict) else None,
         "mapped": _offer_summary(offer) if offer else None,
     }
 
@@ -566,6 +587,19 @@ def _status_fields(payload: Any) -> dict:
         k: payload[k] for k in ("code", "msg", "message", "error", "status", "success")
         if k in payload
     }
+
+
+def _raw_mapped_fields(node: dict, item_map: dict) -> dict:
+    """The literal dig() result for each map.item.* entry, truncated for
+    display -- shows exactly what a field resolved to (null vs. a populated but
+    wrong value vs. genuinely absent) without needing another round trip."""
+    out = {}
+    for field, path in (item_map or {}).items():
+        if not isinstance(path, (str, list)):
+            continue  # e.g. the nested `specs` sub-mapping, not a plain field
+        value = dig(node, path)
+        out[field] = value[:200] if isinstance(value, str) else value
+    return out
 
 
 def _offer_summary(offer: RawOffer) -> dict:
