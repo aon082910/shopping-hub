@@ -98,13 +98,22 @@ class _AlibabaCNBase(SiteAdapter):
         """
         if self._provider is not _UNSET:
             return self._provider
-        from .provider import ProviderClient, ProviderError
+        from .provider import ProviderClient, ProviderError, get_preset
 
         s = get_settings()
         self._provider = None
-        if not (s.cn_provider_key or s.cn_provider_base_url):
-            return None
         preset = self.site_cfg.get("provider_preset") or s.cn_provider_preset
+        try:
+            preset_cfg = get_preset(preset)
+        except ProviderError as e:
+            log.error("[%s] provider not usable: %s", self.key, e)
+            return None
+        # Some presets (e.g. usfans) authenticate via a logged-in browser
+        # session rather than an API key, so they need neither
+        # CN_PROVIDER_KEY nor CN_PROVIDER_BASE_URL to be usable.
+        needs_key = (preset_cfg.get("auth") or {}).get("mode", "none") != "none"
+        if needs_key and not (s.cn_provider_key or s.cn_provider_base_url):
+            return None
         try:
             self._provider = ProviderClient(
                 preset, self.key, self.fetcher, base_url=s.cn_provider_base_url

@@ -73,14 +73,16 @@ sites:
 
   taobao:
     enabled: true
-    driver: browser
+    driver: hybrid
+    provider_preset: usfans
     delay_seconds: 6.0
     concurrency: 1
     needs_agent: true
 
   tmall:
     enabled: true
-    driver: browser
+    driver: hybrid
+    provider_preset: usfans
     delay_seconds: 6.0
     concurrency: 1
     needs_agent: true

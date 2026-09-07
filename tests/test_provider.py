@@ -392,6 +392,26 @@ def test_driver_resolution():
     _with_key("test-key")
 
 
+def test_no_key_preset_still_activates_the_provider():
+    """usfans (and anything else with `auth: mode: none`) authenticates via a
+    logged-in browser session, not an API key -- it must not be gated behind
+    CN_PROVIDER_KEY/CN_PROVIDER_BASE_URL the way otapi/rapidapi are, or
+    turning on `driver: hybrid` for taobao/tmall would silently do nothing.
+    """
+    print("\na no-key preset (usfans) is not gated behind CN_PROVIDER_KEY")
+    _with_key(None)
+    base_url = os.environ.pop("CN_PROVIDER_BASE_URL", None)
+    try:
+        check_true(
+            "usfans provider client builds with no key and no base_url override",
+            _adapter(driver="hybrid", provider_preset="usfans").provider is not None,
+        )
+    finally:
+        if base_url:
+            os.environ["CN_PROVIDER_BASE_URL"] = base_url
+        _with_key("test-key")
+
+
 def test_hybrid_detail_flow():
     print("\nhybrid detail flow")
     from sourcehub.scrapers.base import RawOffer
@@ -735,7 +755,7 @@ def test_usfans_multi_sku_variants_map_to_readable_attrs():
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
-               test_driver_resolution,
+               test_driver_resolution, test_no_key_preset_still_activates_the_provider,
                test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
                test_usfans_resolve_then_detail, test_usfans_multi_sku_item_a_real_login_actually_returned,
                test_usfans_detailurl_populated_but_wrong_is_not_trusted,
