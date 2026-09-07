@@ -688,11 +688,17 @@ def _offer_summary(offer: RawOffer) -> dict:
         "title": offer.title[:80],
         "url": offer.url[:100],
         "price": offer.price_min,
+        "price_max": offer.price_max,
         "currency": offer.currency,
         "moq": offer.moq,
         "images": len(offer.image_urls),
         "specs": len(offer.specs),
         "tiers": len(offer.tiers),
+        "variants": [
+            {"sku": v.sku, "name": v.name, "price": v.price, "stock": v.stock,
+             "in_stock": v.in_stock, "attrs": v.attrs}
+            for v in offer.variants
+        ],
     }
 
 
