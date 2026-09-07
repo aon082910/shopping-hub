@@ -29,6 +29,12 @@ sites:
     # JS shell with no attributes in the HTML, so only detail needs a browser.
     render_detail: browser
     delay_seconds: 3.0
+    # Confirmed live 2026-09-08: with ALIEXPRESS_APP_KEY/SECRET set, the admin
+    # "Crawl" button and `crawl --categories` walk the real category tree
+    # (524 leaf categories via aliexpress.affiliate.category.get) instead of
+    # sweeping config.yaml's keyword list -- see category_seeds()/
+    # crawl_category() in scrapers/aliexpress.py. Without those credentials
+    # this adapter has no category concept at all and stays keyword-only.
     concurrency: 2
     # Colour/size/length pickers only exist as DOM elements now -- AliExpress's
     # own runParams blob ships empty (isCSR: true), so per-SKU price and stock

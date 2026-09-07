@@ -216,6 +216,17 @@ def bind_fixture(adapter: SiteAdapter, site_key: Optional[str] = None) -> Option
     """Point an adapter at its saved fixture instead of the network.
 
     Returns the manifest, or None when that site has no fixture yet.
+
+    Also blanks the handful of official-API credential settings a few adapters
+    (AliExpress, eBay, LCSC's provider driver...) check to prefer a live API
+    over HTML scraping. A fixture always captures whichever path was live when
+    it was recorded -- usually HTML, since the API path needs no fixture at
+    all -- so a real credential sitting in this machine's .env would silently
+    divert search() away from the fixture and at a real network call instead,
+    which fails offline and has nothing to do with whether the *captured*
+    parsing logic still works. Mutates the process-wide Settings singleton, but
+    this is only ever called from the standalone fixture-replay test process,
+    which has no other reason to want real credentials in the same run.
     """
     site_key = site_key or adapter.key
     search_html = load_html(site_key, SEARCH_HTML)
@@ -224,6 +235,18 @@ def bind_fixture(adapter: SiteAdapter, site_key: Optional[str] = None) -> Option
     manifest = load_manifest(site_key)
     detail_html = load_html(site_key, DETAIL_HTML)
     detail_url = manifest.get("detail_url")
+
+    from .config import get_settings
+
+    settings = get_settings()
+    for field in (
+        "aliexpress_app_key", "aliexpress_app_secret",
+        "ebay_client_id", "ebay_client_secret",
+        "bestbuy_api_key",
+        "octopart_client_id", "octopart_client_secret",
+    ):
+        if hasattr(settings, field):
+            setattr(settings, field, "")
 
     adapter._fetcher = FixtureFetcher(search_html, detail_html, detail_url)
     if hasattr(adapter, "_browser"):

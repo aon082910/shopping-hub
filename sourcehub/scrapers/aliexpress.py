@@ -295,6 +295,73 @@ class AliExpressAdapter(SiteAdapter):
     # --------------------------------------------------------------- official API
 
     def _search_api(self, keyword: str, max_pages: int) -> Iterator[RawOffer]:
+        yield from self._paged_api_query({"keywords": keyword}, max_pages, context=repr(keyword))
+
+    # Confirmed live 2026-09-08: aliexpress.affiliate.category.get returns the
+    # whole tree (564 categories, 40 top-level) in one call, and
+    # aliexpress.affiliate.product.query accepts category_ids in place of
+    # keywords -- no keyword needed at all. Seeded on *leaf* categories only
+    # (ones nothing else lists as a parent): a top-level id like Consumer
+    # Electronics (44) has 2M+ records behind it but the API only actually
+    # lets you page to a few thousand of them before returning an empty
+    # result (confirmed live: page 50 partial, page 100 empty) -- the same
+    # real per-query ceiling LCSC's anonymous API has, just reached differently.
+    # Querying by leaf keeps each category's slice inside that ceiling instead
+    # of silently only ever seeing the newest few thousand items of a huge
+    # parent bucket.
+    def category_seeds(self) -> list[tuple[str, str]]:
+        s = get_settings()
+        if not (s.aliexpress_app_key and s.aliexpress_app_secret):
+            return []
+        try:
+            cats = self._fetch_categories()
+        except Exception as e:
+            log.warning("[aliexpress] category discovery failed: %s", e)
+            return []
+        if not cats:
+            return []
+        parent_ids = {c.get("parent_category_id") for c in cats if c.get("parent_category_id")}
+        leaves = [c for c in cats if c.get("category_id") not in parent_ids]
+        return [
+            (clean(str(c.get("category_name") or c["category_id"])), str(c["category_id"]))
+            for c in leaves
+            if c.get("category_id") is not None
+        ]
+
+    def _fetch_categories(self) -> list[dict]:
+        s = get_settings()
+        params = {
+            "app_key": s.aliexpress_app_key,
+            "method": "aliexpress.affiliate.category.get",
+            "sign_method": "hmac-sha256",
+            "timestamp": str(int(time.time() * 1000)),
+            "format": "json",
+            "v": "2.0",
+        }
+        params["sign"] = _sign_top(params, s.aliexpress_app_secret)
+        payload = self.fetcher.get(self.API_ENDPOINT, params=params, expect_json=True).json()
+        if "error_response" in payload:
+            err = payload["error_response"]
+            log.error("[aliexpress] category.get rejected (code=%s): %s",
+                      err.get("code"), str(err.get("msg"))[:160])
+            return []
+        return (
+            _dig(payload, "aliexpress_affiliate_category_get_response", "resp_result",
+                 "result", "categories", "category")
+            or []
+        )
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        s = get_settings()
+        if not (s.aliexpress_app_key and s.aliexpress_app_secret):
+            return
+        yield from self._paged_api_query(
+            {"category_ids": seed_url}, max_pages or 100, context=f"category {seed_url}"
+        )
+
+    def _paged_api_query(
+        self, body_extra: dict, max_pages: int, *, context: str
+    ) -> Iterator[RawOffer]:
         s = get_settings()
         for page in range(1, max_pages + 1):
             params = {
@@ -304,20 +371,26 @@ class AliExpressAdapter(SiteAdapter):
                 "timestamp": str(int(time.time() * 1000)),
                 "format": "json",
                 "v": "2.0",
-                "keywords": keyword,
                 "page_no": str(page),
                 "page_size": "50",
                 "target_currency": "USD",
                 "target_language": "EN",
                 "ship_to_country": "US",
                 "tracking_id": s.aliexpress_tracking_id or "",
+                **body_extra,
             }
             params["sign"] = _sign_top(params, s.aliexpress_app_secret)
             try:
-                resp = self.fetcher.get(self.API_ENDPOINT, params=params, expect_json=True)
-                payload = resp.json()
+                payload = self.fetcher.get(self.API_ENDPOINT, params=params, expect_json=True).json()
             except Exception as e:
-                log.warning("[aliexpress] API page %s failed: %s", page, e)
+                log.warning("[aliexpress] API page %s failed for %s: %s", page, context, e)
+                return
+
+            if "error_response" in payload:
+                err = payload["error_response"]
+                log.error("[aliexpress] API rejected the request for %s (code=%s): %s. "
+                          "Check ALIEXPRESS_APP_KEY/SECRET permissions or the method name.",
+                          context, err.get("code"), str(err.get("msg"))[:160])
                 return
 
             products = (
@@ -326,33 +399,52 @@ class AliExpressAdapter(SiteAdapter):
                 or []
             )
             if not products:
+                log.info("[aliexpress] no items on page %s for %s", page, context)
                 return
             for p in products:
-                pid = str(p.get("product_id") or "")
-                if not pid:
-                    continue
-                pmin, pmax, ccy = parse_price(
-                    str(p.get("target_sale_price") or p.get("sale_price") or ""), "USD"
-                )
-                offer = RawOffer(
-                    site_key=self.key,
-                    site_product_id=pid,
-                    url=p.get("product_detail_url") or f"{self.base_url}/item/{pid}.html",
-                    title=clean(p.get("product_title") or ""),
-                    currency=p.get("target_sale_price_currency") or ccy,
-                    price_min=pmin,
-                    price_max=pmax,
-                    rating=self.parse_float(str(p.get("evaluate_rate") or "")),
-                    orders_count=self.parse_int(str(p.get("lastest_volume") or "")),
-                    seller_name=p.get("shop_name"),
-                    seller_url=p.get("shop_url"),
-                    category_path=str(p.get("second_level_category_name") or ""),
-                    image_urls=[_https(u) for u in [p.get("product_main_image_url")] if u],
-                    raw={"source": "api"},
-                )
-                for u in (p.get("product_small_image_urls", {}) or {}).get("string", [])[:8]:
-                    offer.image_urls.append(_https(u))
-                yield offer
+                offer = self._offer_from_api_product(p)
+                if offer:
+                    yield offer
+
+    def _offer_from_api_product(self, p: dict) -> Optional[RawOffer]:
+        pid = str(p.get("product_id") or "")
+        title = clean(p.get("product_title") or "")
+        if not pid or not title:
+            return None
+
+        # The API returns typed numeric strings ("6.17"), not formatted price
+        # text ("$6.17") -- parse_price deliberately refuses a bare number with
+        # no currency symbol (it would otherwise treat any stray digits as a
+        # price), so this has to read the fields directly instead.
+        pmin = _as_float(p.get("target_sale_price") or p.get("sale_price"))
+        pmax = _as_float(p.get("target_original_price") or p.get("original_price"))
+        if pmax is not None and pmin is not None and pmax <= pmin:
+            pmax = None
+        ccy = (
+            p.get("target_sale_price_currency")
+            or p.get("target_app_sale_price_currency")
+            or "USD"
+        )
+
+        offer = RawOffer(
+            site_key=self.key,
+            site_product_id=pid,
+            url=p.get("product_detail_url") or f"{self.base_url}/item/{pid}.html",
+            title=title,
+            currency=ccy,
+            price_min=pmin,
+            price_max=pmax,
+            rating=self.parse_float(str(p.get("evaluate_rate") or "")),
+            orders_count=self.parse_int(str(p.get("lastest_volume") or "")),
+            seller_name=p.get("shop_name"),
+            seller_url=p.get("shop_url"),
+            category_path=str(p.get("second_level_category_name") or ""),
+            image_urls=[_https(u) for u in [p.get("product_main_image_url")] if u],
+            raw={"source": "api"},
+        )
+        for u in (p.get("product_small_image_urls", {}) or {}).get("string", [])[:8]:
+            offer.image_urls.append(_https(u))
+        return offer
 
 
 # ------------------------------------------------------------------- helpers
