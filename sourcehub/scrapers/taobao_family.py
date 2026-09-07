@@ -80,6 +80,10 @@ class _AlibabaCNBase(SiteAdapter):
     search_template = ""
     item_url_template = ""
     result_selector = ""
+    # These sites expect China-region traffic; SiteAdapter's base default
+    # (en-US/America) is for everything else.
+    login_locale = "zh-CN"
+    login_timezone = "Asia/Shanghai"
 
     def __init__(self, config=None):
         super().__init__(config)

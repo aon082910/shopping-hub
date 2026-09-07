@@ -178,7 +178,7 @@ def cmd_browser_login(args) -> int:
     adapter = get_adapter(args.site)
     url = getattr(adapter, "login_url", "") or adapter.base_url
     print(f"Opening {url} for a one-time login to {adapter.name}...")
-    interactive_login(url)
+    interactive_login(url, locale=adapter.login_locale, timezone_id=adapter.login_timezone)
     print("Session saved. Headless crawls will now reuse these cookies.")
     return 0
 

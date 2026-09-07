@@ -392,6 +392,22 @@ def test_driver_resolution():
     _with_key("test-key")
 
 
+def test_login_locale_defaults():
+    """browser-login's locale/timezone: normal US identity by default, China
+    for the domestic-China family. Found live: Temu's Google sign-in can
+    silently hang when the browser claims to be in Shanghai for an account
+    with no China history, which the shared BrowserSession default would
+    otherwise apply to every site's login, not just taobao/tmall/1688.
+    """
+    print("\nbrowser-login locale/timezone defaults")
+    check("non-China site defaults to a normal US identity",
+          (_adapter("temu").login_locale, _adapter("temu").login_timezone),
+          ("en-US", "America/New_York"))
+    check("domestic-China family overrides to zh-CN/Shanghai",
+          (_adapter("taobao").login_locale, _adapter("taobao").login_timezone),
+          ("zh-CN", "Asia/Shanghai"))
+
+
 def test_no_key_preset_still_activates_the_provider():
     """usfans (and anything else with `auth: mode: none`) authenticates via a
     logged-in browser session, not an API key -- it must not be gated behind
@@ -967,7 +983,8 @@ def test_usfans_multi_sku_variants_map_to_readable_attrs():
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
-               test_driver_resolution, test_no_key_preset_still_activates_the_provider,
+               test_driver_resolution, test_login_locale_defaults,
+               test_no_key_preset_still_activates_the_provider,
                test_hybrid_detail_flow, test_detail_provider_merges_variants_onto_the_search_stage_offer,
                test_via_agent_login_routes_through_a_browser_session,
                test_usfans_resolve_then_detail, test_usfans_search_is_a_post_with_a_json_body,

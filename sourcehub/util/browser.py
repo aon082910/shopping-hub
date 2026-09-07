@@ -81,7 +81,8 @@ class BrowserSession:
     """Thin wrapper over a persistent Playwright context."""
 
     def __init__(self, *, headless: Optional[bool] = None, profile_dir: Optional[str] = None,
-                 slow_mo: int = 0, block_media: bool = True):
+                 slow_mo: int = 0, block_media: bool = True,
+                 locale: str = "zh-CN", timezone_id: str = "Asia/Shanghai"):
         s = get_settings()
         self.headless = s.sourcehub_headless if headless is None else headless
         self.profile_dir = profile_dir or str(s.browser_profile_path)
@@ -95,6 +96,14 @@ class BrowserSession:
         self.proxy = s.sourcehub_proxy or None
         self.user_agent = s.sourcehub_user_agent
         self.slow_mo = slow_mo
+        # Defaults match the taobao/tmall/1688/USFans traffic this was built
+        # for. A non-China login (e.g. Temu via Google) needs the opposite:
+        # Google's sign-in does its own geo/fingerprint consistency checks and
+        # can silently hang or blank out on a browser claiming to be in
+        # Shanghai while signing into an account with no China history --
+        # SiteAdapter.login_locale/login_timezone override this per site.
+        self.locale = locale
+        self.timezone_id = timezone_id
         self._pw = None
         self._ctx = None
 
@@ -114,8 +123,8 @@ class BrowserSession:
             "slow_mo": self.slow_mo,
             "viewport": {"width": 1440, "height": 900},
             "user_agent": self.user_agent,
-            "locale": "zh-CN",
-            "timezone_id": "Asia/Shanghai",
+            "locale": self.locale,
+            "timezone_id": self.timezone_id,
             "args": [
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
@@ -373,9 +382,13 @@ class BrowserSession:
                 continue
 
 
-def interactive_login(start_url: str, profile_dir: str | None = None) -> None:
+def interactive_login(
+    start_url: str, profile_dir: str | None = None,
+    locale: str = "zh-CN", timezone_id: str = "Asia/Shanghai",
+) -> None:
     """Open a visible browser so a human can log in once. Cookies persist to disk."""
-    sess = BrowserSession(headless=False, profile_dir=profile_dir, slow_mo=50, block_media=False)
+    sess = BrowserSession(headless=False, profile_dir=profile_dir, slow_mo=50, block_media=False,
+                          locale=locale, timezone_id=timezone_id)
     sess.start()
     try:
         with sess.page() as pg:

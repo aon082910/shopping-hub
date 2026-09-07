@@ -129,6 +129,15 @@ class SiteAdapter(ABC):
     home_currency: str = "USD"
     needs_agent: bool = False
 
+    # Used by `browser-login`'s interactive session. Domestic-China sites (and
+    # forwarding agents) override these to zh-CN/Asia-Shanghai -- see
+    # taobao_family.py. Everything else defaults to a normal US identity:
+    # confirmed live that Google's sign-in (Temu logs in via Google) can
+    # silently hang or blank out when the browser claims to be in Shanghai
+    # for an account with no China history.
+    login_locale: str = "en-US"
+    login_timezone: str = "America/New_York"
+
     def __init__(self, config: CrawlConfig | None = None):
         self.config = config or load_crawl_config()
         self.site_cfg = self.config.site(self.key)

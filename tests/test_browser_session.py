@@ -109,6 +109,32 @@ def main() -> None:
         src = inspect.getsource(interactive_login)
         check("interactive_login constructs its session with block_media=False",
               "block_media=False" in src)
+
+        print("\nlocale/timezone default to zh-CN/Shanghai (taobao/tmall/1688/USFans)")
+        fake_factory3 = _FakeSyncPlaywright()
+        sync_api_module.sync_playwright = lambda: fake_factory3
+        sess3 = BrowserSession(profile_dir="/tmp/does-not-matter")
+        sess3.start()
+        launch_kwargs = fake_factory3.instance.chromium.launch_calls[0]
+        check("default locale", launch_kwargs["locale"], "zh-CN")
+        check("default timezone", launch_kwargs["timezone_id"], "Asia/Shanghai")
+
+        print("\nlocale/timezone are overridable (a non-China login, e.g. Temu via "
+              "Google, needs the opposite -- Google's sign-in can hang or blank "
+              "out on a browser claiming to be in Shanghai)")
+        fake_factory4 = _FakeSyncPlaywright()
+        sync_api_module.sync_playwright = lambda: fake_factory4
+        sess4 = BrowserSession(profile_dir="/tmp/does-not-matter",
+                               locale="en-US", timezone_id="America/New_York")
+        sess4.start()
+        launch_kwargs4 = fake_factory4.instance.chromium.launch_calls[0]
+        check("overridden locale", launch_kwargs4["locale"], "en-US")
+        check("overridden timezone", launch_kwargs4["timezone_id"], "America/New_York")
+
+        print("\ninteractive_login() forwards locale/timezone_id to the session")
+        src2 = inspect.getsource(interactive_login)
+        check("interactive_login passes locale through", "locale=locale" in src2)
+        check("interactive_login passes timezone_id through", "timezone_id=timezone_id" in src2)
     finally:
         sync_api_module.sync_playwright = original
 
