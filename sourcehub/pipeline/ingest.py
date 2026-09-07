@@ -405,10 +405,18 @@ def _recompute_costs(offer: Offer, fx: FxConverter) -> None:
 
     # Duty is only included when you have configured a rate table (duty.yaml).
     # Off, duty_usd stays None and the UI says duty is excluded -- which is honest,
-    # unlike quietly assuming zero.
-    from ..duty import load_duty_table
+    # unlike quietly assuming zero. When an Easyship API token is configured and
+    # this category has a known HTS line, that live call (including current
+    # Section 301/trade-remedy surcharges no static table tracks) takes
+    # priority; estimate_duty() falls back to duty.yaml's static rate on any
+    # Easyship error so a flaky external call never breaks ingestion.
+    from ..config import get_settings
+    from ..duty import estimate_duty
 
-    rate, duty = load_duty_table().estimate(subtotal, offer.raw_category_path)
+    rate, duty = estimate_duty(
+        subtotal, offer.raw_category_path,
+        easyship_api_token=get_settings().easyship_api_token,
+    )
     offer.duty_rate, offer.duty_usd = rate, duty
     offer.landed_cost_usd = round(subtotal + shipping + (duty or 0.0), 4)
 

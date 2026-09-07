@@ -66,6 +66,18 @@ class DutyTable:
                     best_rate, best_len = float(rate), len(p)
         return float(best_rate)
 
+    def hts_for(self, category_path: str | None) -> Optional[str]:
+        """Longest matching category prefix wins, else None (no known HTS
+        line for this category -- Easyship can't be called without one)."""
+        path = (category_path or "").strip("/")
+        best_hts, best_len = None, -1
+        for prefix, hts in self.hts_by_category.items():
+            p = str(prefix).strip("/")
+            if path == p or path.startswith(p + "/"):
+                if len(p) > best_len:
+                    best_hts, best_len = str(hts), len(p)
+        return best_hts
+
     def estimate(self, goods_usd, category_path=None):
         """Return (rate, duty_usd). (None, None) when duty is not configured."""
         if not self.enabled or goods_usd is None:
@@ -203,3 +215,99 @@ def check_against_usitc(table: DutyTable, fetcher: Any = None) -> list[dict]:
             "drift": drift,
         })
     return results
+
+
+# ---------------------------------------------------------------- Easyship
+
+EASYSHIP_TAX_DUTY_URL = "https://public-api.easyship.com/2024-09/taxes_and_duties"
+
+# Easyship's own internal Country IDs (from their Countries API, GET
+# /2024-09/countries -- confirmed live 2026-09-07). Every site this project
+# tracks ships from China to the US, so these are the only two ever needed.
+EASYSHIP_CHINA_ID = 49
+EASYSHIP_US_ID = 234
+
+
+def fetch_easyship_duty(
+    hts_code: str, customs_value_usd: float, *, api_token: str,
+    fetcher: Any = None, timeout: float = 10.0,
+) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Live duty calculation via Easyship's Tax & Duty API, including
+    Section 301/trade-remedy surcharges USITC's own rate table doesn't
+    carry at all -- confirmed live: a hand-tools HTS code that USITC (and
+    the CBP ruling that sourced it) shows as a flat 5.3% general rate came
+    back from Easyship with an *additional* 12.5% Section 301 layer on top,
+    a real, current, per-line surcharge no static local table can track.
+
+    Returns (rate, duty_usd, error). ``rate`` is the TOTAL effective ad
+    valorem rate actually applied (base + every additional layer), backed
+    out as duty_usd / customs_value_usd -- not just the base HTS rate.
+    Anything in ``error`` means don't trust the other two (both are None).
+
+    This is a real production API call against a real (metered) account,
+    unlike USITC's anonymous one -- callers must have their own api_token
+    and should expect this to occasionally fail or run slow, which is why
+    estimate_duty() below always has a static-table fallback ready.
+    """
+    if not api_token:
+        return None, None, "no Easyship API token configured"
+    if customs_value_usd <= 0:
+        return None, None, "customs_value_usd must be positive"
+    if fetcher is None:
+        from .util.http import Fetcher
+
+        fetcher = Fetcher(retries=1, timeout=timeout)
+    body = {
+        "destination_country_id": EASYSHIP_US_ID,
+        "origin_country_id": EASYSHIP_CHINA_ID,
+        "insurance_fee": 0,
+        "shipment_charge": 0,
+        "currency": "USD",
+        "items": [{
+            "duty_origin_country_id": EASYSHIP_CHINA_ID,
+            "hs_code": re.sub(r"\D", "", hts_code),
+            "customs_value": round(customs_value_usd, 2),
+        }],
+    }
+    try:
+        resp = fetcher.post(
+            EASYSHIP_TAX_DUTY_URL, json_body=body,
+            headers={"Authorization": f"Bearer {api_token}", "Accept": "application/json"},
+        )
+        data = resp.json()
+    except Exception as e:
+        return None, None, f"request failed: {e}"
+    tax_and_duty = data.get("tax_and_duty") if isinstance(data, dict) else None
+    duty_usd = tax_and_duty.get("duty") if isinstance(tax_and_duty, dict) else None
+    if duty_usd is None:
+        return None, None, f"unexpected response shape: {str(data)[:200]}"
+    return float(duty_usd) / customs_value_usd, round(float(duty_usd), 4), None
+
+
+def estimate_duty(goods_usd, category_path=None, *, table: "DutyTable | None" = None,
+                  easyship_api_token: str = "", fetcher: Any = None,
+                  ) -> tuple[Optional[float], Optional[float]]:
+    """The single entry point ingest.py calls: live Easyship when a token is
+    configured and this category has a known HTS line, the static
+    duty.yaml table otherwise (no token, no HTS line for this category, or
+    Easyship errored/timed out) -- Section-301-aware numbers when available,
+    a documented, honest estimate when not, never a broken ingest.
+
+    ``fetcher`` overrides the HTTP client used for the Easyship call --
+    tests inject a fake one here rather than hitting the real network.
+    """
+    table = table or load_duty_table()
+    if not table.enabled or goods_usd is None:
+        return None, None
+
+    hts = table.hts_for(category_path) if easyship_api_token else None
+    if hts:
+        rate, duty, error = fetch_easyship_duty(
+            hts, goods_usd, api_token=easyship_api_token, fetcher=fetcher,
+        )
+        if error is None:
+            return rate, duty
+        log.warning("[duty] Easyship call failed for HTS %s (%s); falling back to duty.yaml's "
+                    "static rate for %r", hts, error, category_path)
+
+    return table.estimate(goods_usd, category_path)

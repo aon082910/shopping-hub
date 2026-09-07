@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     octopart_client_id: str = ""
     octopart_client_secret: str = ""
     bestbuy_api_key: str = ""
+    easyship_api_token: str = ""   # live per-offer duty calc, incl. Section 301 -- see duty.py
     cn_provider_preset: str = "otapi"   # a key from providers.yaml
     cn_provider_base_url: str = ""      # overrides the preset's base_url
     cn_provider_key: str = ""

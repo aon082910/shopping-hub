@@ -21,7 +21,8 @@ from sqlalchemy import func, select  # noqa: E402
 from sourcehub.db.models import Offer, Supplier  # noqa: E402
 from sourcehub.db.session import init_db, session_scope  # noqa: E402
 from sourcehub.duty import (  # noqa: E402
-    DutyTable, check_against_usitc, load_duty_table, parse_usitc_rate,
+    DutyTable, check_against_usitc, estimate_duty, fetch_easyship_duty,
+    load_duty_table, parse_usitc_rate,
 )
 from sourcehub.pipeline.ingest import IngestContext, ingest_offer  # noqa: E402
 from sourcehub.scrapers.base import RawOffer  # noqa: E402
@@ -211,6 +212,91 @@ def run() -> int:
                results["toys/gaming-accessories"]["error"] is not None)
     check("a category with no HTS line configured is never checked at all",
           "computers/monitors" in results, False)
+
+    print()
+    print("Easyship: live per-offer duty, including Section 301, when configured")
+
+    class FakeEasyshipFetcher:
+        def __init__(self, payload=None, raise_error=False):
+            self.payload = payload
+            self.raise_error = raise_error
+            self.calls: list[dict] = []
+
+        def post(self, url, *, json_body=None, headers=None, referer=None):
+            self.calls.append({"url": url, "body": json_body, "headers": headers or {}})
+            if self.raise_error:
+                raise RuntimeError("simulated network failure")
+            return Response(url=url, status=200, text=json.dumps(self.payload))
+
+    check("no token configured -> a clean error, not a crash",
+          fetch_easyship_duty("8205.59.55", 30.0, api_token="")[2] is not None, True)
+
+    # Real shape captured live: base 5.3% + a 12.5% Section 301 "Forced
+    # Labour" surcharge Easyship tracks that no static table here does.
+    easyship_fetcher = FakeEasyshipFetcher({
+        "tax_and_duty": {
+            "currency": "USD", "duty": 0.8, "tax": 0.01,
+            "import_duty_details": [{
+                "hs_code_applied": "8205595500", "base_duty_rate": 0.053,
+                "base_duty_amount": 0.24,
+                "additional_rates": [{"description": "Section 301 Forced Labour 12.5% "
+                                                      "(FLIP FRN, flat)", "rate": 0.125,
+                                      "amount": 0.56}],
+                "line_item_total_duty": 0.8,
+            }],
+        },
+    })
+    rate, duty, error = fetch_easyship_duty(
+        "8205.59.55", 4.47, api_token="test-token", fetcher=easyship_fetcher,
+    )
+    check("no error on a successful call", error, None)
+    check("effective rate backed out of duty/customs_value "
+          "(base + Section 301, not just the base rate)",
+          round(rate, 4), round(0.8 / 4.47, 4))
+    check("duty_usd taken straight from Easyship's own total", duty, 0.8)
+    check("digits-only hs_code sent (dots stripped)",
+          easyship_fetcher.calls[0]["body"]["items"][0]["hs_code"], "82055955")
+    check("Bearer auth header sent",
+          easyship_fetcher.calls[0]["headers"].get("Authorization"), "Bearer test-token")
+
+    print()
+    print("estimate_duty(): Easyship when it can be used, duty.yaml's static "
+          "table otherwise -- never a broken ingest")
+    live_table = DutyTable(
+        enabled=True, default_rate=0.0,
+        by_category={"tools/hand-tools": 0.053, "packaging/shipping-supplies": 0.03},
+        hts_by_category={"tools/hand-tools": "8205.59.55"},
+    )
+
+    r1 = estimate_duty(4.47, "tools/hand-tools", table=live_table,
+                       easyship_api_token="")
+    check("no token -> static rate used, Easyship never attempted", r1, (0.053, round(4.47*0.053, 2)))
+
+    good_fetcher = FakeEasyshipFetcher(easyship_fetcher.payload)
+    er, ed = estimate_duty(4.47, "tools/hand-tools", table=live_table,
+                           easyship_api_token="test-token", fetcher=good_fetcher)
+    check("with a token and a known HTS line, Easyship's rate wins over "
+          "duty.yaml's static 0.053 (its own base-only figure)",
+          round(er, 4), round(0.8 / 4.47, 4))
+    check("Easyship was actually called", len(good_fetcher.calls), 1)
+
+    failing_fetcher = FakeEasyshipFetcher(raise_error=True)
+    fr, fd = estimate_duty(4.47, "tools/hand-tools", table=live_table,
+                           easyship_api_token="test-token", fetcher=failing_fetcher)
+    check("Easyship failure falls back to duty.yaml's static rate, not a crash",
+          (fr, fd), (0.053, round(4.47*0.053, 2)))
+
+    no_hts_fetcher = FakeEasyshipFetcher()
+    r2 = estimate_duty(10.0, "packaging/shipping-supplies", table=live_table,
+                       easyship_api_token="test-token", fetcher=no_hts_fetcher)
+    check("a category with no HTS line never attempts Easyship at all -- "
+          "static rate used directly", r2, (0.03, 0.3))
+    check("...confirmed: zero calls made", len(no_hts_fetcher.calls), 0)
+
+    check("disabled table -> (None, None) regardless of Easyship config",
+          estimate_duty(10.0, "tools/hand-tools",
+                       table=DutyTable(enabled=False), easyship_api_token="x"),
+          (None, None))
 
     print()
     print("=" * 62)
