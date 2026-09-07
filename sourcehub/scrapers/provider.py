@@ -522,10 +522,26 @@ def _probe_detail(client: "ProviderClient", preset_name: str, site_key: str, ite
         "mode": "detail",
         "item_url": item_url,
         "resolve": resolve_report,
+        # Chinese API envelopes overwhelmingly carry the real status here even on
+        # HTTP 200 -- {"code":401,"msg":"Please log in to continue"} being exactly
+        # the case this preset exists for. Surfaced directly rather than making
+        # someone infer "still not logged in" from node_keys equalling
+        # top_level_keys, which just means "the descent found nothing" and could
+        # mean several different things on its own.
+        "status_fields": _status_fields(raw_payload),
         "top_level_keys": sorted(raw_payload.keys()) if isinstance(raw_payload, dict) else type(raw_payload).__name__,
         "detail_path": mapping.get("detail_path"),
         "node_keys": sorted(node.keys()) if isinstance(node, dict) else type(node).__name__ if node else None,
         "mapped": _offer_summary(offer) if offer else None,
+    }
+
+
+def _status_fields(payload: Any) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        k: payload[k] for k in ("code", "msg", "message", "error", "status", "success")
+        if k in payload
     }
 
 

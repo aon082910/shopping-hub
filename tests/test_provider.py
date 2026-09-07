@@ -312,6 +312,19 @@ def test_probe_on_a_detail_only_preset():
     check_true("mapped the detail response", report["mapped"] is not None)
     check("mapped id", report["mapped"]["id"], "12345")
     check("mapped title", report["mapped"]["title"], "Signed Cable Organizer")
+    check("no error fields on a clean success", report["status_fields"], {})
+
+    print("\nan API-level error (401 while logged out) is surfaced directly, "
+          "not left for node_keys to hint at")
+    error_payload = {"code": 401, "msg": "Please log in to continue", "data": None, "success": False}
+    error_report = probe(
+        "agent_lookup", "taobao", "x", FakeFetcher(error_payload),
+        item_url="https://item.taobao.com/item.htm?id=1",
+    )
+    check("still reports detail mode", error_report["mode"], "detail")
+    check("no mappable item", error_report["mapped"], None)
+    check("the real status is surfaced, not just 'node_keys == top_level_keys'",
+          error_report["status_fields"], {"code": 401, "msg": "Please log in to continue", "success": False})
 
 
 # ------------------------------------------------------- driver resolution

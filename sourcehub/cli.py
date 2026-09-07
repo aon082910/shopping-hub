@@ -798,10 +798,22 @@ def cmd_provider_probe(args) -> int:
     print(_json.dumps(report, indent=2, ensure_ascii=False))
     if report.get("mode") == "detail":
         if not report["mapped"]:
-            print("\nThe detail call returned no mappable item. Compare 'node_keys' above "
-                  "against map.item.* in providers.yaml -- a null/renamed field there is "
-                  "the usual cause. If 'resolve' shows resolved_id: null, the resolve step "
-                  "itself is the problem, not the detail mapping.")
+            status = report.get("status_fields") or {}
+            code = str(status.get("code", ""))
+            if code and code not in ("200", "0"):
+                print(f"\nThe detail call itself reports an error -- see 'status_fields' above "
+                      f"({status}). That's the actual cause, not the field mapping. A 401/"
+                      f"'log in' message here almost always means the saved browser profile "
+                      f"isn't logged in (or the login expired) -- try `agent-login --agent "
+                      f"<key>` again and check you're actually signed in before pressing Enter.")
+            elif report.get("resolve") and not report["resolve"].get("resolved_id"):
+                print("\nThe resolve step itself returned no id -- that's upstream of the "
+                      "detail mapping. Check 'resolve.top_level_keys' above against "
+                      "resolve.map.id in providers.yaml.")
+            else:
+                print("\nThe detail call returned no mappable item. Compare 'node_keys' above "
+                      "against map.item.* in providers.yaml -- a null/renamed field there is "
+                      "the usual cause.")
         return 0 if report["mapped"] else 1
     if not report["items_found"]:
         print("\nNo items matched `map.items_path`. Candidate array paths found in the")
