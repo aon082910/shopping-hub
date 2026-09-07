@@ -149,11 +149,10 @@ sites:
   # Component distributors. These publish real manufacturer part numbers, so
   # matching uses the exact brand+MPN path rather than fuzzy titles.
   lcsc:
-    # Disabled: LCSC's public search endpoint moved and now answers HTTP 200
-    # with an application-level 404. The adapter is correct once SEARCH_API in
-    # scrapers/components.py points at the current path -- find it in DevTools
-    # on lcsc.com/search, set it, and flip this to true.
-    enabled: false
+    # Re-enabled 2026-09-07: found the endpoint's new home (SEARCH_API in
+    # scrapers/components.py) by hooking the live site's own Vue component
+    # rather than guessing -- confirmed anonymously callable via curl.
+    enabled: true
     delay_seconds: 2.0
     concurrency: 2
 

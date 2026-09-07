@@ -36,7 +36,18 @@ class LcscAdapter(SiteAdapter):
     base_url = "https://www.lcsc.com"
     home_currency = "USD"
 
-    SEARCH_API = "https://wmsc.lcsc.com/wmsc/search/global"
+    # Moved (2026-09), confirmed live: the old wmsc.lcsc.com/wmsc/search/global
+    # now 404s. lcsc.com's frontend is a Vue/Nuxt SPA that fetches search
+    # results client-side rather than server-rendering them or exposing them
+    # in a page-embedded JSON blob, so the new endpoint was found by hooking
+    # the page's own axios instance (window.__vue__ on the results component)
+    # and calling its search method directly to see what it actually calls.
+    # Same request/response shape as before (keyword/currentPage/pageSize in,
+    # productCode/productModel/productPriceList out) -- only the URL and the
+    # top-level result key (`dataList`, not `productList`) changed. A plain
+    # `keyword` (not `globalKeyword`) with no `catalogIdList` gives a flat,
+    # cross-category result list in one call, confirmed anonymously via curl.
+    SEARCH_API = "https://wmsc.lcsc.com/ftps/wm/product/query/list"
     SEARCH = "https://www.lcsc.com/search?q={kw}&page={page}"
 
     def extra_headers(self) -> dict:
@@ -71,7 +82,8 @@ class LcscAdapter(SiteAdapter):
 
             result = payload.get("result") or {}
             items = (
-                (result.get("productSearchResultVO") or {}).get("productList")
+                result.get("dataList")
+                or (result.get("productSearchResultVO") or {}).get("productList")
                 or result.get("productList")
                 or []
             )
