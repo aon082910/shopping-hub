@@ -169,9 +169,12 @@ def cmd_schedule(args) -> int:
 
 
 def cmd_browser_login(args) -> int:
-    from .scrapers.registry import get_adapter
+    from .scrapers.registry import ADAPTERS, get_adapter
     from .util.browser import interactive_login
 
+    if args.site not in ADAPTERS:
+        print(f"unknown site {args.site!r}; known: {', '.join(sorted(ADAPTERS))}")
+        return 1
     adapter = get_adapter(args.site)
     url = getattr(adapter, "login_url", "") or adapter.base_url
     print(f"Opening {url} for a one-time login to {adapter.name}...")
@@ -1186,8 +1189,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("schedule", help="run scheduled crawls in the foreground").set_defaults(
         func=cmd_schedule)
 
-    b = sub.add_parser("browser-login", help="one-time login for taobao/tmall/1688")
-    b.add_argument("--site", required=True, choices=["taobao", "tmall", "1688"])
+    b = sub.add_parser("browser-login", help="one-time login for a site that needs one")
+    b.add_argument("--site", required=True,
+                   help="a site key from config.yaml/scrapers/registry.py, "
+                   "e.g. taobao, tmall, 1688, temu")
     b.set_defaults(func=cmd_browser_login)
 
     al = sub.add_parser(
