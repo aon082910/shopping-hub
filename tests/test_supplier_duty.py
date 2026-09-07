@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -19,9 +20,12 @@ from sqlalchemy import func, select  # noqa: E402
 
 from sourcehub.db.models import Offer, Supplier  # noqa: E402
 from sourcehub.db.session import init_db, session_scope  # noqa: E402
-from sourcehub.duty import DutyTable, load_duty_table  # noqa: E402
+from sourcehub.duty import (  # noqa: E402
+    DutyTable, check_against_usitc, load_duty_table, parse_usitc_rate,
+)
 from sourcehub.pipeline.ingest import IngestContext, ingest_offer  # noqa: E402
 from sourcehub.scrapers.base import RawOffer  # noqa: E402
+from sourcehub.util.http import Response  # noqa: E402
 
 FAILS: list[str] = []
 
@@ -141,6 +145,72 @@ def run() -> int:
     check("bad date -> unknown", DutyTable(as_of="not-a-date").staleness_days, None)
     check_true("valid date -> a number",
                isinstance(DutyTable(as_of="2020-01-01").staleness_days, int))
+
+    print()
+    print("parsing USITC's own rate text")
+    check("Free -> 0.0", parse_usitc_rate("Free"), 0.0)
+    check("percent -> fraction", parse_usitc_rate("5.3%"), 0.053)
+    check("blank -> not comparable", parse_usitc_rate(""), None)
+    check("a compound/specific rate this project can't reduce to one "
+          "ad valorem number -> not comparable, not a false mismatch",
+          parse_usitc_rate("5.3¢/kg + 3%"), None)
+    check("None -> not comparable", parse_usitc_rate(None), None)
+
+    print()
+    print("re-verifying duty.yaml's rates against USITC's live HTS table "
+          "(fake HTTP -- the real endpoint is checked live by `duty-check`, "
+          "not by this offline test)")
+
+    class FakeUsitcFetcher:
+        """Stands in for one chapter's worth of USITC getRates rows."""
+
+        def __init__(self, rows_by_chapter):
+            self.rows_by_chapter = rows_by_chapter
+            self.calls: list[str] = []
+
+        def get(self, url, *, params=None, headers=None, referer=None, expect_json=False):
+            htsno = (params or {}).get("htsno", "")
+            self.calls.append(htsno)
+            chapter = htsno.split(".")[0][:2]
+            rows = self.rows_by_chapter.get(chapter)
+            if rows is None:
+                raise RuntimeError("simulated network failure")
+            return Response(url=url, status=200, text=json.dumps(rows))
+
+    fake_table = DutyTable(
+        enabled=True,
+        by_category={"computers/usb-hubs-docks": 0.0, "tools/hand-tools": 0.02,
+                     "toys/gaming-accessories": 0.0},
+        hts_by_category={
+            "computers/usb-hubs-docks": "8471.80.10",
+            # Deliberately wrong vs. the fake "live" value below (0.053), to
+            # prove drift is actually detected, not just always reported clean.
+            "tools/hand-tools": "8205.59.55",
+            # No fake data seeded for chapter 95 at all, to prove a request
+            # failure is reported as an error, not silently treated as a match.
+            "toys/gaming-accessories": "9504.50.00",
+        },
+    )
+    fake_fetcher = FakeUsitcFetcher({
+        "84": [{"htsno": "8471.80.10.00", "description": "Control or adapter units",
+               "general": "Free"}],
+        "82": [{"htsno": "8205.59.55.60", "description": "Other handtools",
+               "general": "5.3%"}],
+    })
+    results = {r["category"]: r for r in check_against_usitc(fake_table, fetcher=fake_fetcher)}
+
+    check("usb-hubs-docks matches -> no drift",
+          results["computers/usb-hubs-docks"]["drift"], False)
+    check("usb-hubs-docks live rate parsed",
+          results["computers/usb-hubs-docks"]["live_rate"], 0.0)
+    check_true("hand-tools mismatch is flagged as drift",
+               results["tools/hand-tools"]["drift"])
+    check("hand-tools live rate still reported alongside the drift flag",
+          results["tools/hand-tools"]["live_rate"], 0.053)
+    check_true("a request failure is reported as an error, not a false match",
+               results["toys/gaming-accessories"]["error"] is not None)
+    check("a category with no HTS line configured is never checked at all",
+          "computers/monitors" in results, False)
 
     print()
     print("=" * 62)

@@ -507,6 +507,44 @@ def cmd_watch(args) -> int:
         return 0
 
 
+def cmd_duty_check(args) -> int:
+    """Re-verify duty.yaml's sourced rates against USITC's own live HTS rate
+    table, and report any drift. Only checks entries with a known HTS line in
+    duty.yaml's hts_by_category -- a rate sourced some other way (a broker,
+    an agent's own reference page) has no HTS line to check against and is
+    skipped, not flagged.
+    """
+    from .duty import check_against_usitc, load_duty_table
+
+    table = load_duty_table()
+    if not table.hts_by_category:
+        print("No HTS-sourced rates configured in duty.yaml's hts_by_category -- nothing to check.")
+        return 0
+
+    results = check_against_usitc(table)
+    drift_count = error_count = 0
+    for r in results:
+        if r["error"]:
+            error_count += 1
+            print(f"ERROR   {r['category']:<35} HTS {r['htsno']:<14} {r['error']}")
+        elif r["drift"]:
+            drift_count += 1
+            print(f"DRIFT   {r['category']:<35} HTS {r['htsno']:<14} "
+                  f"duty.yaml says {r['expected_rate']!r}, USITC currently says "
+                  f"{r['live_rate_raw']!r} ({r['live_rate']})")
+        else:
+            print(f"ok      {r['category']:<35} HTS {r['htsno']:<14} "
+                  f"{r['live_rate_raw']!r} (matches duty.yaml)")
+
+    print(f"\n{len(results)} checked, {drift_count} drifted, {error_count} errors.")
+    if drift_count:
+        print("Update duty.yaml's by_category (and its as_of date) for anything "
+              "that drifted -- USITC's own rate is authoritative for the base "
+              "HTS line, though it still doesn't include Section 301/trade-"
+              "remedy surcharges.")
+    return 1 if drift_count or error_count else 0
+
+
 def cmd_health(args) -> int:
     """Report which adapters have quietly stopped finding listings."""
     from .health import health_summary
@@ -1216,6 +1254,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "health", help="report adapters that stopped finding listings"
     ).set_defaults(func=cmd_health)
+
+    sub.add_parser(
+        "duty-check", help="re-verify duty.yaml's rates against USITC's live HTS table"
+    ).set_defaults(func=cmd_duty_check)
 
     w = sub.add_parser("watch", help="price watches and alerts")
     w.add_argument("action", choices=["add", "list", "remove", "check"])

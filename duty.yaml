@@ -44,6 +44,19 @@ by_category:
   # apparel: 0.16
   # apparel/shoes: 0.20
 
+# The specific HTS line backing each rate above, so `duty-check` can re-verify
+# the *current* general rate against USITC's own live HTS API
+# (hts.usitc.gov/reststop/getRates) and flag drift -- a ruling's rate is only
+# as fresh as the day it was issued. Only entries with a known HTS code can be
+# checked this way; anything sourced some other way (a broker, USFans' own
+# reference page, etc.) has no line here and `duty-check` will just skip it.
+hts_by_category:
+  computers/usb-hubs-docks: "8471.80.10"
+  tools/measuring-test-equipment: "9017.80.00"
+  tools/hand-tools: "8205.59.55"
+  toys/gaming-accessories: "9504.50.00"
+  packaging/shipping-supplies: "3923.90.00"
+
 note: >
   Estimates only, and BASE HTS RATES ONLY -- Section 301 and any current
   reciprocal-tariff surcharge on China-origin goods are NOT included (both

@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -34,6 +35,8 @@ from .config import ROOT, config_path
 log = logging.getLogger(__name__)
 
 _CACHE: Optional["DutyTable"] = None
+
+USITC_RATES_URL = "https://hts.usitc.gov/reststop/getRates"
 
 
 @dataclass
@@ -44,6 +47,10 @@ class DutyTable:
     default_rate: float = 0.0
     de_minimis_usd: Optional[float] = None
     by_category: dict = field(default_factory=dict)
+    # category path -> HTS number backing that rate, e.g. "8471.80.10". Only
+    # entries sourced from a specific HTS classification (a CBP ruling, USITC
+    # itself) can go here -- see check_against_usitc().
+    hts_by_category: dict = field(default_factory=dict)
     note: str = ""
 
     def rate_for(self, category_path: str | None) -> float:
@@ -99,8 +106,100 @@ def load_duty_table(path=None, refresh: bool = False) -> DutyTable:
             default_rate=float(data.get("default_rate", 0.0) or 0.0),
             de_minimis_usd=float(dm) if dm is not None else None,
             by_category=dict(data.get("by_category") or {}),
+            hts_by_category=dict(data.get("hts_by_category") or {}),
             note=str(data.get("note", "")),
         )
     if path is None:
         _CACHE = table
     return table
+
+
+def parse_usitc_rate(text: str | None) -> Optional[float]:
+    """"Free" -> 0.0, "5.3%" -> 0.053, "" or a compound/specific rate this
+    project can't express as a single ad valorem number -> None (not a
+    mismatch -- just not comparable).
+    """
+    if text is None:
+        return None
+    t = text.strip()
+    if not t:
+        return None
+    if t.lower() == "free":
+        return 0.0
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*%$", t)
+    return float(m.group(1)) / 100 if m else None
+
+
+def fetch_usitc_general_rate(htsno: str, fetcher: Any = None) -> tuple[Optional[str], Optional[str]]:
+    """The live "general" (Column 1) rate USITC's own HTS lookup shows for
+    ``htsno`` right now, as the raw text CBP/USITC use ("Free", "5.3%", ...).
+
+    Confirmed live (2026-09): hts.usitc.gov's search UI itself calls this
+    same endpoint (found by inspecting its own network traffic, not from any
+    published API docs -- there don't appear to be any). ``htsno`` alone
+    doesn't filter server-side; it determines which full tariff *chapter*
+    comes back (a couple thousand rows), and the exact line has to be found
+    client-side by matching ``htsno`` -- slow and a bit absurd for looking up
+    one line, but it is real, public, and needs no API key.
+
+    Returns (raw_rate_text, error). Anything in ``error`` means don't trust
+    ``raw_rate_text``.
+    """
+    if fetcher is None:
+        from .util.http import Fetcher
+
+        fetcher = Fetcher(retries=1, timeout=20.0)
+    try:
+        resp = fetcher.get(
+            USITC_RATES_URL, params={"htsno": htsno, "keyword": "x"},
+            headers={"Accept": "application/json"}, expect_json=True,
+        )
+        rows = resp.json()
+    except Exception as e:
+        return None, f"request failed: {e}"
+    if not isinstance(rows, list):
+        return None, "unexpected response shape (not a list)"
+    # Confirmed live: which digit depth actually carries the rate varies by
+    # heading -- some put it on the bare (no statistical-suffix) line (e.g.
+    # 8205.59.55), others only on a specific 10-digit ".00" line beneath it
+    # (e.g. 8471.80.10.00, where 8471.80.10 alone has a blank general field).
+    # A prefix match, taking the first row under `htsno` that actually has a
+    # non-blank rate, handles both shapes without needing to know which one
+    # applies ahead of time.
+    prefix = htsno.rstrip(".")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_hts = str(row.get("htsno", ""))
+        if (row_hts == prefix or row_hts.startswith(prefix + ".")) and str(row.get("general") or "").strip():
+            return row.get("general"), None
+    return None, f"HTS {htsno!r} not found in the returned chapter -- may have been reclassified"
+
+
+def check_against_usitc(table: DutyTable, fetcher: Any = None) -> list[dict]:
+    """Re-verify every by_category rate that has a known HTS line against
+    USITC's own live rate table, and report drift.
+
+    Only checks entries present in ``hts_by_category`` -- a rate sourced some
+    other way (a broker, a forwarding agent's own reference page) has no HTS
+    line to check against and is silently skipped, not flagged as an error.
+    """
+    results = []
+    for category, htsno in table.hts_by_category.items():
+        expected = table.by_category.get(category)
+        raw, error = fetch_usitc_general_rate(str(htsno), fetcher=fetcher)
+        live_rate = parse_usitc_rate(raw) if error is None else None
+        drift = (
+            error is None and live_rate is not None and expected is not None
+            and abs(live_rate - float(expected)) > 1e-9
+        )
+        results.append({
+            "category": category,
+            "htsno": htsno,
+            "expected_rate": expected,
+            "live_rate_raw": raw,
+            "live_rate": live_rate,
+            "error": error,
+            "drift": drift,
+        })
+    return results
