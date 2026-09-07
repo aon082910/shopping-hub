@@ -198,6 +198,19 @@ sites:
     delay_seconds: 2.5
     concurrency: 2
 
+  temu:
+    # Disabled: search()/fetch_detail() are a stub (see scrapers/temu.py's
+    # docstring) -- confirmed live, an anonymous session gets redirected to a
+    # mandatory sign-in wall within seconds even for the plain homepage, so
+    # this needs a real logged-in account. Run
+    # `python -m sourcehub.cli browser-login --site temu` to log in once,
+    # then capture the real search endpoint/markup from that logged-in
+    # session before writing selectors, and flip this to true.
+    enabled: false
+    render: browser
+    delay_seconds: 3.0
+    concurrency: 1
+
 matching:
   # Two offers merge into one canonical product when the weighted score clears this.
   auto_merge_threshold: 0.86

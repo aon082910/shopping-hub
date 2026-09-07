@@ -19,12 +19,14 @@ def _load() -> dict[str, Type[SiteAdapter]]:
     from .madeinchina import MadeInChinaAdapter
     from .storefronts import GeekbuyingAdapter, TomtopAdapter
     from .taobao_family import Alibaba1688Adapter, TaobaoAdapter, TmallAdapter
+    from .temu import TemuAdapter
 
     classes = [
         AliExpressAdapter, AlibabaAdapter, Alibaba1688Adapter, TaobaoAdapter,
         TmallAdapter, DHgateAdapter, ChinavasionAdapter, GlobalSourcesAdapter,
         MadeInChinaAdapter, GearBestAdapter, BanggoodAdapter, EbayAdapter,
         BestBuyAdapter, LcscAdapter, OctopartAdapter, TomtopAdapter, GeekbuyingAdapter,
+        TemuAdapter,
     ]
     return {c.key: c for c in classes}
 
