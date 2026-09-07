@@ -65,6 +65,17 @@ class ChinavasionAdapter(SiteAdapter):
         log.info("[chinavasion] sitemap: %s product urls", len(urls))
         return urls
 
+    def category_seeds(self) -> list[tuple[str, str]]:
+        # One seed is enough: crawl_category() below walks the whole sitemap
+        # itself, the same list search() already filters by keyword.
+        return [("all", "sitemap")]
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        for url in self._product_urls():
+            offer = self._offer_from_url(url)
+            if offer is not None:
+                yield offer
+
     def search(self, keyword: str, max_pages: int | None = None) -> Iterator[RawOffer]:
         # Every token must appear in the slug; the slug is the product title, so this
         # is a reasonable stand-in for the search the site will not give us.

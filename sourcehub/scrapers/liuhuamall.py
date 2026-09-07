@@ -40,6 +40,16 @@ class LiuhuamallAdapter(SiteAdapter):
 
     SEARCH_API = "https://www.liuhuamall.com/api/search/buyer/goods"
 
+    def category_seeds(self) -> list[tuple[str, str]]:
+        # Confirmed live: an empty keyword against the same search endpoint
+        # returns the whole catalog (categoryId is already sent empty too), so
+        # one seed with no real category walking is enough -- crawl_category()
+        # just pages until the API itself runs out of results.
+        return [("all", "")]
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        yield from self.search("", max_pages=max_pages or 10_000)
+
     def search(self, keyword: str, max_pages: int | None = None) -> Iterator[RawOffer]:
         for page in range(1, (max_pages or self.max_pages) + 1):
             filt = {

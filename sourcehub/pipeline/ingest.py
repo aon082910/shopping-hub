@@ -488,6 +488,103 @@ def _safe_detail(adapter: SiteAdapter, raw: RawOffer) -> RawOffer:
 # ------------------------------------------------------------------- crawl loop
 
 
+def _crawl_workers(site_key: str, site_cfg: dict) -> tuple[int, int]:
+    """(worker count, batch size) for one site, forced serial under a browser.
+
+    Playwright's sync API is thread-bound: a browser session belongs to the thread
+    that created it and cannot be driven from a worker thread. Any site that
+    renders pages in a browser therefore has to enrich serially. No real loss --
+    a browser page load dwarfs the per-host delay that concurrency exists to hide.
+    """
+    workers = max(1, int(site_cfg.get("concurrency", 1)))
+    renders_in_browser = (
+        str(site_cfg.get("render", "http")).lower() == "browser"
+        or str(site_cfg.get("driver", "")).lower() in ("browser", "hybrid")
+        or str(site_cfg.get("search_driver", "")).lower() == "browser"
+        or str(site_cfg.get("detail_driver", "")).lower() == "browser"
+    )
+    if renders_in_browser and workers > 1:
+        log.info("[%s] browser rendering forces serial detail fetches "
+                 "(concurrency %s ignored)", site_key, workers)
+        workers = 1
+    return workers, max(1, workers * 4)
+
+
+def _run_sources(
+    site_key: str,
+    sources: Iterable[tuple[str, str, Iterable[RawOffer]]],
+    *,
+    detail_adapters: list[SiteAdapter],
+    cfg: CrawlConfig,
+    fetch_details: bool,
+    detail_limit: int | None,
+    batch_size: int,
+) -> IngestStats:
+    """Ingest one or more (mode, label, offers) sources for one site.
+
+    Shared by keyword search (``crawl_site``) and category-tree crawling
+    (``crawl_site_categories``) -- everything past "here is an iterator of
+    RawOffer" is identical: batch, decide what needs a detail fetch, ingest,
+    commit per batch so a late crash does not lose the run.
+    """
+    stats = IngestStats()
+    for mode, label, offers in sources:
+        run_id = _start_run(site_key, mode, label)
+        run_stats = IngestStats()
+        try:
+            with session_scope() as session:
+                ctx = IngestContext(session, cfg)
+                try:
+                    details_done = 0
+                    for batch in _batched(offers, batch_size):
+                        run_stats.seen += len(batch)
+
+                        # Deciding what needs enriching touches the DB, so it
+                        # happens here on the owning thread, before any fan-out.
+                        to_fetch, passthrough = [], []
+                        for raw in batch:
+                            wants = (
+                                fetch_details
+                                and (detail_limit is None or details_done < detail_limit)
+                                and _needs_detail(session, ctx, raw)
+                            )
+                            if wants:
+                                to_fetch.append(raw)
+                                details_done += 1
+                            else:
+                                passthrough.append(raw)
+
+                        enriched = _fetch_details_parallel(detail_adapters, to_fetch)
+
+                        for raw in enriched + passthrough:
+                            try:
+                                existed = _offer_exists(session, ctx, raw)
+                                ingest_offer(ctx, raw)
+                                if existed:
+                                    run_stats.updated += 1
+                                else:
+                                    run_stats.new += 1
+                            except Exception as e:
+                                run_stats.errors += 1
+                                log.warning(
+                                    "[%s] failed to ingest %s: %s",
+                                    site_key, raw.site_product_id, e,
+                                    exc_info=log.isEnabledFor(10),
+                                )
+                        session.commit()
+                finally:
+                    ctx.close()
+            _finish_run(run_id, True, run_stats)
+        except Exception as e:
+            log.error("[%s] crawl failed for %r: %s", site_key, label, e)
+            _finish_run(run_id, False, run_stats, str(e))
+
+        log.info("[%s] %r -> %s", site_key, label, run_stats)
+        for field in ("seen", "new", "updated", "skipped", "errors"):
+            setattr(stats, field, getattr(stats, field) + getattr(run_stats, field))
+    return stats
+
+
 def crawl_site(
     site_key: str,
     keywords: Sequence[str] | None = None,
@@ -500,27 +597,9 @@ def crawl_site(
     """Search one site for each keyword and ingest everything found."""
     cfg = config or load_crawl_config()
     keywords = list(keywords or cfg.keywords)
-    stats = IngestStats()
 
     site_cfg = cfg.site(site_key)
-    workers = max(1, int(site_cfg.get("concurrency", 1)))
-
-    # Playwright's sync API is thread-bound: a browser session belongs to the thread
-    # that created it and cannot be driven from a worker thread. Any site that
-    # renders pages in a browser therefore has to enrich serially. No real loss --
-    # a browser page load dwarfs the per-host delay that concurrency exists to hide.
-    renders_in_browser = (
-        str(site_cfg.get("render", "http")).lower() == "browser"
-        or str(site_cfg.get("driver", "")).lower() in ("browser", "hybrid")
-        or str(site_cfg.get("search_driver", "")).lower() == "browser"
-        or str(site_cfg.get("detail_driver", "")).lower() == "browser"
-    )
-    if renders_in_browser and workers > 1:
-        log.info("[%s] browser rendering forces serial detail fetches "
-                 "(concurrency %s ignored)", site_key, workers)
-        workers = 1
-
-    batch_size = max(1, workers * 4)
+    workers, batch_size = _crawl_workers(site_key, site_cfg)
 
     adapter: SiteAdapter = get_adapter(site_key, cfg)
     # Extra adapters only exist to give each detail worker its own HTTP session.
@@ -529,61 +608,59 @@ def crawl_site(
     ] if fetch_details else [adapter]
 
     try:
-        for keyword in keywords:
-            run_id = _start_run(site_key, "search", keyword)
-            kw_stats = IngestStats()
-            try:
-                with session_scope() as session:
-                    ctx = IngestContext(session, cfg)
-                    try:
-                        details_done = 0
-                        for batch in _batched(adapter.search(keyword, max_pages), batch_size):
-                            kw_stats.seen += len(batch)
+        sources = (("search", kw, adapter.search(kw, max_pages)) for kw in keywords)
+        stats = _run_sources(
+            site_key, sources, detail_adapters=detail_adapters, cfg=cfg,
+            fetch_details=fetch_details, detail_limit=detail_limit, batch_size=batch_size,
+        )
+    finally:
+        for a in detail_adapters:
+            a.close()
 
-                            # Deciding what needs enriching touches the DB, so it
-                            # happens here on the owning thread, before any fan-out.
-                            to_fetch, passthrough = [], []
-                            for raw in batch:
-                                wants = (
-                                    fetch_details
-                                    and (detail_limit is None or details_done < detail_limit)
-                                    and _needs_detail(session, ctx, raw)
-                                )
-                                if wants:
-                                    to_fetch.append(raw)
-                                    details_done += 1
-                                else:
-                                    passthrough.append(raw)
+    with session_scope() as session:
+        recount_categories(session)
+        _recount_suppliers(session)
 
-                            enriched = _fetch_details_parallel(detail_adapters, to_fetch)
+    return stats
 
-                            for raw in enriched + passthrough:
-                                try:
-                                    existed = _offer_exists(session, ctx, raw)
-                                    ingest_offer(ctx, raw)
-                                    if existed:
-                                        kw_stats.updated += 1
-                                    else:
-                                        kw_stats.new += 1
-                                except Exception as e:
-                                    kw_stats.errors += 1
-                                    log.warning(
-                                        "[%s] failed to ingest %s: %s",
-                                        site_key, raw.site_product_id, e,
-                                        exc_info=log.isEnabledFor(10),
-                                    )
-                            # Commit per batch so a late crash doesn't lose the run.
-                            session.commit()
-                    finally:
-                        ctx.close()
-                _finish_run(run_id, True, kw_stats)
-            except Exception as e:
-                log.error("[%s] crawl failed for %r: %s", site_key, keyword, e)
-                _finish_run(run_id, False, kw_stats, str(e))
 
-            log.info("[%s] %r -> %s", site_key, keyword, kw_stats)
-            for field in ("seen", "new", "updated", "skipped", "errors"):
-                setattr(stats, field, getattr(stats, field) + getattr(kw_stats, field))
+def crawl_site_categories(
+    site_key: str,
+    *,
+    max_pages: int | None = None,
+    fetch_details: bool = True,
+    detail_limit: int | None = None,
+    config: CrawlConfig | None = None,
+) -> IngestStats:
+    """Walk every category this site's adapter knows about and ingest everything.
+
+    Unlike ``crawl_site``, this never touches config.yaml's seed keyword list --
+    it is driven entirely by ``SiteAdapter.category_seeds()``, so it only covers
+    what the adapter actually implements. A site with no seeds (most forwarding
+    agents, and every marketplace too large to enumerate) does nothing here and
+    returns an empty ``IngestStats``; callers that want a keyword-sweep fallback
+    (the admin "Crawl" button) decide that themselves by checking category_seeds()
+    before choosing which function to call.
+    """
+    cfg = config or load_crawl_config()
+    site_cfg = cfg.site(site_key)
+    workers, batch_size = _crawl_workers(site_key, site_cfg)
+
+    adapter: SiteAdapter = get_adapter(site_key, cfg)
+    seeds = adapter.category_seeds()
+    detail_adapters = [adapter] + [
+        get_adapter(site_key, cfg) for _ in range(workers - 1)
+    ] if fetch_details else [adapter]
+
+    try:
+        sources = (
+            ("category", label, adapter.crawl_category(seed_url, max_pages))
+            for label, seed_url in seeds
+        )
+        stats = _run_sources(
+            site_key, sources, detail_adapters=detail_adapters, cfg=cfg,
+            fetch_details=fetch_details, detail_limit=detail_limit, batch_size=batch_size,
+        )
     finally:
         for a in detail_adapters:
             a.close()

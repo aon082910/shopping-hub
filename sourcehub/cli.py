@@ -26,7 +26,13 @@ from .db.models import CanonicalProduct, Image, MatchReview, Offer, Site
 from .db.search import index_product
 from .db.session import init_db, session_scope
 from .pipeline.categories import recategorize_all, recount_categories
-from .pipeline.ingest import crawl_all, crawl_site, deactivate_stale, refresh_prices
+from .pipeline.ingest import (
+    crawl_all,
+    crawl_site,
+    crawl_site_categories,
+    deactivate_stale,
+    refresh_prices,
+)
 from .util.money import refresh_fx_rates
 
 
@@ -85,10 +91,19 @@ def cmd_crawl(args) -> int:
         with session_scope() as session:
             refresh_fx_rates(session)
 
-    keywords = _csv(args.keyword) or load_crawl_config().keywords
-    sites = _csv(args.sites)
+    sites = _csv(args.sites) or list(load_crawl_config().enabled_sites())
 
-    if sites:
+    if args.categories:
+        results = {}
+        for key in sites:
+            results[key] = crawl_site_categories(
+                key,
+                max_pages=args.pages,
+                fetch_details=not args.no_details,
+                detail_limit=args.detail_limit,
+            )
+    elif _csv(args.sites):
+        keywords = _csv(args.keyword) or load_crawl_config().keywords
         results = {}
         for key in sites:
             results[key] = crawl_site(
@@ -98,6 +113,7 @@ def cmd_crawl(args) -> int:
                 detail_limit=args.detail_limit,
             )
     else:
+        keywords = _csv(args.keyword) or load_crawl_config().keywords
         results = crawl_all(
             None, keywords,
             max_pages=args.pages,
@@ -1198,6 +1214,9 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("crawl", help="search sites and ingest listings")
     c.add_argument("--sites", help="comma-separated site keys (default: all enabled)")
     c.add_argument("--keyword", help="comma-separated keywords (default: config.yaml)")
+    c.add_argument("--categories", action="store_true",
+                   help="walk each site's category_seeds() instead of searching "
+                        "keywords -- only sites that implement it support this")
     c.add_argument("--pages", type=int, help="listing pages per keyword")
     c.add_argument("--no-details", action="store_true",
                    help="skip product pages (fast, but no specs or shipping cost)")

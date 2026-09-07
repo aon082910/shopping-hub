@@ -257,8 +257,23 @@ class SiteAdapter(ABC):
         return offer
 
     def category_seeds(self) -> list[tuple[str, str]]:
-        """Optional [(category_path, url)] pairs for category-driven crawling."""
+        """[(category_path, seed_url)] pairs for a full-catalog crawl.
+
+        Empty by default: most sites here are open marketplaces (eBay, AliExpress,
+        Taobao...) with no coherent "all products" -- even their own search only
+        ever shows a slice. A non-empty list is this adapter opting in to
+        ``crawl_category`` being callable for each of these seeds; the two are
+        always implemented as a pair.
+        """
         return []
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        """Yield every offer reachable from one ``category_seeds()`` entry.
+
+        Only meaningful on an adapter that also overrides ``category_seeds()`` --
+        the pipeline never calls this on a site that returned no seeds.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no crawl_category()")
 
     # Values marketplaces put in schema.org fields that are not product identity.
     PLACEHOLDER_BRANDS = {
