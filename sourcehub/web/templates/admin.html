@@ -163,14 +163,28 @@
 </section>
 
 <section>
-  <h2 class="section-head">Sources</h2>
+  <h2 class="section-head">Sources
+    <small>crawl a site's full catalog now, using every seed keyword in config.yaml,
+      instead of waiting for the nightly schedule</small></h2>
   <table class="table">
-    <thead><tr><th>Site</th><th class="num">Listings</th><th>Ordering</th></tr></thead>
+    <thead><tr><th>Site</th><th class="num">Listings</th><th>Ordering</th><th></th></tr></thead>
     <tbody>
       {% for s in sites %}
-      <tr><td>{{ s.name }}</td><td class="num">{{ '{:,}'.format(s.offers) }}</td>
+      <tr>
+        <td>{{ s.name }}</td>
+        <td class="num">{{ '{:,}'.format(s.offers) }}</td>
         <td>{% if s.needs_agent %}<span class="tag tag-warn">agent required</span>
-            {% else %}<span class="tag tag-ok">direct</span>{% endif %}</td></tr>
+            {% else %}<span class="tag tag-ok">direct</span>{% endif %}</td>
+        <td class="order-cell">
+          {% if s.key in crawling %}
+          <span class="tag tag-quiet">crawling&hellip;</span>
+          {% else %}
+          <form method="post" action="/admin/crawl/{{ s.key }}" style="display:inline">
+            <button class="btn btn-sm" type="submit">Crawl</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>

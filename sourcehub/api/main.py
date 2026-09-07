@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..agents import agent_notice, build_agent_links, estimate_agent_total
 from ..config import get_settings
 from ..duty import load_duty_table
+from ..pipeline.manual_crawl import running_sites, start_full_crawl
 from ..pipeline.ondemand import crawl_status, request_crawl
 from ..pipeline.breakeven import analyse
 from ..pipeline.freight import from_specs as spec_freight
@@ -1256,10 +1257,21 @@ def admin(request: Request, session: Session = Depends(db),
             "reviews": review_rows,
             "stats": _stats(session),
             "sites": _site_rows(session),
+            "crawling": running_sites(),
             "categories": category_tree(session),
             "filters": _filters(request),
         },
     )
+
+
+@app.post("/admin/crawl/{site_key}")
+def trigger_crawl(site_key: str, session: Session = Depends(db),
+                   _auth: None = Depends(require_admin),
+                   _origin: None = Depends(require_same_origin)):
+    if session.scalar(select(Site).where(Site.key == site_key)) is None:
+        raise HTTPException(404, "No such site")
+    start_full_crawl(site_key)
+    return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/review/{review_id}/{action}")
