@@ -15,48 +15,14 @@
 <section>
   <h2 class="section-head">Match review queue
     <small>borderline merges the matcher declined to decide on its own</small></h2>
-  {% if reviews %}
-  <div class="tablewrap">
-  <table class="table">
-    <thead><tr><th>Score</th><th>Incoming listing</th><th>Existing product</th><th>Signals</th><th></th></tr></thead>
-    <tbody>
-      {% for r in reviews %}
-      <tr>
-        <td class="num"><b>{{ r.score }}</b></td>
-        <td>
-          <div class="review-pair">
-            {% if r.offer_image %}<img class="review-thumb" src="{{ r.offer_image }}" alt="">
-            {% else %}<div class="review-thumb noimg"></div>{% endif %}
-            <div>
-              <div class="muted small">{{ r.offer_site }}</div>
-              <a href="{{ r.offer_url }}" target="_blank" rel="noopener nofollow">{{ r.offer_title }}</a>
-            </div>
-          </div>
-        </td>
-        <td>
-          <div class="review-pair">
-            {% if r.product_image %}<img class="review-thumb" src="{{ r.product_image }}" alt="">
-            {% else %}<div class="review-thumb noimg"></div>{% endif %}
-            <a href="/product/{{ r.product_slug }}">{{ r.product_title }}</a>
-          </div>
-        </td>
-        <td class="small">
-          {% for k, v in r.signals.items() %}<span class="chip chip-quiet">{{ k }}: {{ v }}</span>{% endfor %}
-        </td>
-        <td class="order-cell">
-          <form method="post" action="/admin/review/{{ r.id }}/approve" style="display:inline">
-            <button class="btn btn-sm btn-primary" type="submit">Merge</button></form>
-          <form method="post" action="/admin/review/{{ r.id }}/reject" style="display:inline">
-            <button class="btn btn-sm" type="submit">Keep separate</button></form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="panel">
+    {% if stats.pending_reviews %}
+    <p><b>{{ '{:,}'.format(stats.pending_reviews) }}</b> pending review{{ 's' if stats.pending_reviews != 1 }}.
+      <a href="/admin/reviews">Open the review queue &rarr;</a></p>
+    {% else %}
+    <p class="muted">Nothing pending. <a href="/admin/reviews">Open the review queue &rarr;</a></p>
+    {% endif %}
   </div>
-  {% else %}
-  <div class="panel"><p class="muted">Nothing pending.</p></div>
-  {% endif %}
 </section>
 
 <section>

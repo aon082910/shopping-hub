@@ -1169,12 +1169,7 @@ def test_watch(watch_id: int, session: Session = Depends(db),
     )
 
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin(request: Request, session: Session = Depends(db),
-          _auth: None = Depends(require_admin)):
-    runs = session.scalars(
-        select(CrawlRun).order_by(CrawlRun.started_at.desc()).limit(40)
-    ).all()
+def _review_rows(session: Session) -> list[dict]:
     reviews = session.scalars(
         select(MatchReview)
         .where(MatchReview.status == "pending")
@@ -1215,6 +1210,15 @@ def admin(request: Request, session: Session = Depends(db),
                 "product_image": f"/media/{product_img.thumb_path}" if product_img and product_img.thumb_path else None,
             }
         )
+    return review_rows
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin(request: Request, session: Session = Depends(db),
+          _auth: None = Depends(require_admin)):
+    runs = session.scalars(
+        select(CrawlRun).order_by(CrawlRun.started_at.desc()).limit(40)
+    ).all()
 
     rejections = []
     rows = session.scalars(
@@ -1254,10 +1258,24 @@ def admin(request: Request, session: Session = Depends(db),
             "rejections": rejections,
             "health": health["sites"],
             "health_attention": health["attention"],
-            "reviews": review_rows,
             "stats": _stats(session),
             "sites": _site_rows(session),
             "crawling": running_sites(),
+            "categories": category_tree(session),
+            "filters": _filters(request),
+        },
+    )
+
+
+@app.get("/admin/reviews", response_class=HTMLResponse)
+def admin_reviews(request: Request, session: Session = Depends(db),
+                   _auth: None = Depends(require_admin)):
+    return templates.TemplateResponse(
+        request,
+        "admin_reviews.html",
+        {
+            "reviews": _review_rows(session),
+            "stats": _stats(session),
             "categories": category_tree(session),
             "filters": _filters(request),
         },
@@ -1315,7 +1333,7 @@ def resolve_review(review_id: int, action: str, session: Session = Depends(db),
         review.status = "rejected"
 
     session.commit()
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin/reviews", status_code=303)
 
 
 @app.post("/admin/merge")
