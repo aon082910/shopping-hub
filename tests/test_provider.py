@@ -284,6 +284,36 @@ def test_probe():
     check_true("reports mapped sample", good["mapped"] and good["mapped"]["id"] == "678901234")
 
 
+def test_probe_on_a_detail_only_preset():
+    """agent_lookup and usfans have no search section -- a bare keyword probe
+    against either used to raise a bare "no 'search' section" ProviderError
+    with no indication of what to do about it. Reported live against usfans.
+    """
+    print("\nprobe on a detail-only preset (no search section)")
+    try:
+        probe("agent_lookup", "taobao", "x", FakeFetcher({}))
+        check("missing --url on a detail-only preset raises", False, True)
+    except ProviderError as e:
+        check_true("names the fix", "--url" in str(e) and "item lookup only" in str(e))
+
+    # agent_lookup's detail_path is ["data", "result", "item"] -- a list of
+    # candidate *full* paths (first hit wins), not one dotted chain, so the item
+    # fields must sit directly under one of those top-level keys.
+    detail_payload = {"item": {
+        "itemId": "12345", "itemName": "Signed Cable Organizer",
+        "price": 9.99, "currency": "USD", "mainImgUrl": "https://example.test/a.jpg",
+    }}
+    report = probe(
+        "agent_lookup", "taobao", "x", FakeFetcher(detail_payload),
+        item_url="https://item.taobao.com/item.htm?id=12345",
+    )
+    check("detail mode is reported", report["mode"], "detail")
+    check("no resolve step for a preset that doesn't declare one", report["resolve"], None)
+    check_true("mapped the detail response", report["mapped"] is not None)
+    check("mapped id", report["mapped"]["id"], "12345")
+    check("mapped title", report["mapped"]["title"], "Signed Cable Organizer")
+
+
 # ------------------------------------------------------- driver resolution
 
 def _adapter(site_key="taobao", **site_cfg):
@@ -528,7 +558,8 @@ def test_usfans_resolve_then_detail():
 
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
-               test_capabilities, test_probe, test_driver_resolution,
+               test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
+               test_driver_resolution,
                test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
                test_usfans_resolve_then_detail):
         fn()

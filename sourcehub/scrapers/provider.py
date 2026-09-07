@@ -436,14 +436,34 @@ def _https(url: str) -> str:
 # ------------------------------------------------------------------- probing
 
 
-def probe(preset_name: str, site_key: str, keyword: str, fetcher) -> dict:
+def probe(
+    preset_name: str, site_key: str, keyword: str, fetcher,
+    *, item_url: str | None = None,
+) -> dict:
     """Call a provider and report what the mapping actually extracted.
 
     Purpose-built for the moment you sign up somewhere new: it shows the raw JSON
-    keys next to the mapped result, so a wrong ``items_path`` is obvious rather
+    keys next to the mapped result, so a wrong ``items_path`` (or, for a
+    detail-only preset, a wrong ``detail_path``/``map.item.*``) is obvious rather
     than showing up as a silently empty crawl.
+
+    Detail-only presets (``agent_lookup``, ``usfans``: most forwarding agents do
+    item lookup, not keyword search) have no ``search`` section to probe at all
+    -- pass ``item_url`` and this tests ``detail`` instead. Without one, this
+    fails with a clear message rather than the confusing "no 'search' section"
+    ``ProviderError`` a plain keyword probe used to raise on them.
     """
     client = ProviderClient(preset_name, site_key, fetcher)
+
+    if not client.can_search:
+        if not item_url:
+            raise ProviderError(
+                f"provider {preset_name!r} has no search section (most forwarding "
+                f"agents do item lookup only) -- pass --url with a real item link "
+                f"from {site_key} to probe its detail call instead"
+            )
+        return _probe_detail(client, preset_name, site_key, item_url)
+
     payload = client.call("search", {"keyword": keyword, "page": 1})
 
     mapping = client.preset.get("map", {})
@@ -462,18 +482,65 @@ def probe(preset_name: str, site_key: str, keyword: str, fetcher) -> dict:
     if items:
         offer = client.to_offer(items[0])
         if offer:
-            report["mapped"] = {
-                "id": offer.site_product_id,
-                "title": offer.title[:80],
-                "url": offer.url[:100],
-                "price": offer.price_min,
-                "currency": offer.currency,
-                "moq": offer.moq,
-                "images": len(offer.image_urls),
-                "specs": len(offer.specs),
-                "tiers": len(offer.tiers),
-            }
+            report["mapped"] = _offer_summary(offer)
     return report
+
+
+def _probe_detail(client: "ProviderClient", preset_name: str, site_key: str, item_url: str) -> dict:
+    # Diagnostic only: a real adapter extracts this with a site-specific regex.
+    # Good enough to drive the detail call -- for a preset with its own
+    # `resolve` step (USFans), this raw id is discarded anyway in favour of
+    # whatever `resolve` returns.
+    m = re.search(r"(\d{6,})", item_url)
+    item_id = m.group(1) if m else item_url
+
+    resolve_report = None
+    if client.preset.get("resolve"):
+        resolved = client.call("resolve", {"id": item_id, "url": item_url})
+        resolve_map = (client.preset.get("resolve") or {}).get("map") or {}
+        resolved_id = dig(resolved, resolve_map.get("id"))
+        resolve_report = {
+            "top_level_keys": sorted(resolved.keys()) if isinstance(resolved, dict) else type(resolved).__name__,
+            "resolved_id": resolved_id,
+        }
+        if resolved_id:
+            item_id = str(resolved_id)
+
+    # One detail call, not two: mapping the same payload the human sees below
+    # avoids a second (for via_agent_login, a second real browser launch) round
+    # trip just to reproduce what the first one already returned.
+    raw_payload = client.call("detail", {"id": item_id, "url": item_url})
+    mapping = client.preset.get("map", {})
+    node = dig(raw_payload, mapping.get("detail_path")) or raw_payload
+    if isinstance(node, list):
+        node = node[0] if node else None
+    offer = client.to_offer(node, detail=True) if node else None
+
+    return {
+        "preset": preset_name,
+        "site": site_key,
+        "mode": "detail",
+        "item_url": item_url,
+        "resolve": resolve_report,
+        "top_level_keys": sorted(raw_payload.keys()) if isinstance(raw_payload, dict) else type(raw_payload).__name__,
+        "detail_path": mapping.get("detail_path"),
+        "node_keys": sorted(node.keys()) if isinstance(node, dict) else type(node).__name__ if node else None,
+        "mapped": _offer_summary(offer) if offer else None,
+    }
+
+
+def _offer_summary(offer: RawOffer) -> dict:
+    return {
+        "id": offer.site_product_id,
+        "title": offer.title[:80],
+        "url": offer.url[:100],
+        "price": offer.price_min,
+        "currency": offer.currency,
+        "moq": offer.moq,
+        "images": len(offer.image_urls),
+        "specs": len(offer.specs),
+        "tiers": len(offer.tiers),
+    }
 
 
 def _candidate_array_paths(obj: Any, prefix: str = "", depth: int = 0) -> list[str]:

@@ -784,7 +784,7 @@ def cmd_provider_probe(args) -> int:
     preset = args.preset or s.cn_provider_preset
     fetcher = Fetcher(delay=1.0, retries=2, timeout=45)
     try:
-        report = probe(preset, args.site, args.keyword or "usb hub", fetcher)
+        report = probe(preset, args.site, args.keyword or "usb hub", fetcher, item_url=args.url)
     except ProviderError as e:
         print(f"ERROR: {e}")
         return 1
@@ -796,6 +796,13 @@ def cmd_provider_probe(args) -> int:
         fetcher.close()
 
     print(_json.dumps(report, indent=2, ensure_ascii=False))
+    if report.get("mode") == "detail":
+        if not report["mapped"]:
+            print("\nThe detail call returned no mappable item. Compare 'node_keys' above "
+                  "against map.item.* in providers.yaml -- a null/renamed field there is "
+                  "the usual cause. If 'resolve' shows resolved_id: null, the resolve step "
+                  "itself is the problem, not the detail mapping.")
+        return 0 if report["mapped"] else 1
     if not report["items_found"]:
         print("\nNo items matched `map.items_path`. Candidate array paths found in the")
         print("response are listed above under 'candidate_item_paths' -- set the right")
@@ -1248,7 +1255,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pp.add_argument("--preset", help="preset name (default: CN_PROVIDER_PRESET)")
     pp.add_argument("--site", default="taobao", choices=["taobao", "tmall", "1688"])
-    pp.add_argument("--keyword", help="search term to probe with")
+    pp.add_argument("--keyword", help="search term to probe with (presets that support search)")
+    pp.add_argument("--url", help="a real item URL (presets that only do item lookup, "
+                                  "e.g. agent_lookup, usfans -- no keyword search)")
     pp.add_argument("--list", action="store_true", help="list available presets and exit")
     pp.set_defaults(func=cmd_provider_probe)
 
