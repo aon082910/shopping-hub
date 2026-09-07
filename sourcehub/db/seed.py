@@ -194,6 +194,18 @@ SITES = [
         "international shipping, same shape as Alibaba/DHgate. Fully anonymous search "
         "confirmed live -- see scrapers/liuhuamall.py.",
     ),
+    dict(
+        key="buckydrop",
+        name="BuckyDrop (1688)",
+        base_url="https://www.buckydrop.com",
+        home_currency="CNY",
+        default_language="en",
+        is_wholesale=True,
+        needs_agent=True,
+        notes="1688 forwarding agent with its own keyword search -- confirmed live, "
+        "no login needed, just a real browser session (see scrapers/buckydrop.py). "
+        "Items carry a real, resolved detail.1688.com URL, no separate resolve step.",
+    ),
 ]
 
 
