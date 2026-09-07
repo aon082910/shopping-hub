@@ -46,24 +46,55 @@ class _StorefrontAdapter(SiteAdapter):
     def search(self, keyword: str, max_pages: int | None = None) -> Iterator[RawOffer]:
         for page in range(1, (max_pages or self.max_pages) + 1):
             url = self.search_page_url(keyword, page)
-            try:
-                body = self.fetch_html(url)
-            except Exception as e:
-                log.warning("[%s] page %s failed: %s", self.key, page, e)
+            offers = self._cards_at(url, page, context=repr(keyword))
+            if offers is None:
                 return
+            yield from offers
 
-            tree = HTMLParser(body)
-            cards = self.select_cards(tree, self.card_selectors)
-            if not cards:
-                log.info("[%s] no cards on page %s for %r", self.key, page, keyword)
+    def category_page_url(self, seed_url: str, page: int) -> str:
+        """Listing URL for page N of one category_seeds() entry.
+
+        Overridden per site: a category's own pagination URL is rarely the same
+        shape as its search box's (see GeekbuyingAdapter).
+        """
+        return seed_url
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        for page in range(1, (max_pages or 50) + 1):
+            url = seed_url if page == 1 else self.category_page_url(seed_url, page)
+            offers = self._cards_at(url, page, context=seed_url)
+            if offers is None:
                 return
-            for card in cards:
-                try:
-                    offer = self._parse_card(card)
-                    if offer:
-                        yield offer
-                except Exception as e:
-                    log.debug("[%s] bad card: %s", self.key, e)
+            yield from offers
+
+    def _cards_at(self, url: str, page: int, *, context: str) -> Optional[list[RawOffer]]:
+        """Every offer on one listing page, or None once there is no such page.
+
+        None (not just an empty list) is the "stop paging" signal, so a page
+        that loaded fine but whose cards all failed to parse doesn't get
+        mistaken for having run off the end of the listing.
+        """
+        try:
+            body = self.fetch_html(url)
+        except Exception as e:
+            log.warning("[%s] page %s failed: %s", self.key, page, e)
+            return None
+
+        tree = HTMLParser(body)
+        cards = self.select_cards(tree, self.card_selectors)
+        if not cards:
+            log.info("[%s] no cards on page %s for %s", self.key, page, context)
+            return None
+
+        offers = []
+        for card in cards:
+            try:
+                offer = self._parse_card(card)
+                if offer:
+                    offers.append(offer)
+            except Exception as e:
+                log.debug("[%s] bad card: %s", self.key, e)
+        return offers
 
     def _product_id(self, url: str, card) -> Optional[str]:
         for pattern in self.id_patterns:
@@ -165,3 +196,31 @@ class GeekbuyingAdapter(_StorefrontAdapter):
     card_selectors = [".searchResultItem", ".goodsItem", ".product-item",
                       "li[class*='goods']"]
     result_selector = ".searchResultItem"
+
+    # Confirmed live 2026-09-08: /sitemap/product.xml 404s despite being listed
+    # in sitemap.xml, so category pages are the only path to a full catalog.
+    # Page 1 is the bare /category/<slug>-<id> URL; page N>1 is
+    # /category/<slug>-<id>/<N>-40-3-0-0-0-grid-0-all-0.html (40 items/page,
+    # confirmed distinct products across pages 1 and 2 of a live category).
+    CATEGORY_LINK_RE = re.compile(r'href="(/category/([A-Za-z0-9][A-Za-z0-9_-]*-\d+))"')
+
+    def category_seeds(self) -> list[tuple[str, str]]:
+        try:
+            html = self.fetch_html(self.base_url + "/")
+        except Exception as e:
+            log.warning("[geekbuying] category discovery failed: %s", e)
+            return []
+        seen: dict[str, str] = {}
+        for m in self.CATEGORY_LINK_RE.finditer(html):
+            path = m.group(1)
+            if path in seen:
+                continue
+            label = clean(re.sub(r"-\d+$", "", path.rsplit("/", 1)[-1]).replace("-", " "))
+            seen[path] = label
+        if not seen:
+            log.warning("[geekbuying] no /category/ links found on the homepage -- "
+                        "its nav markup has likely changed.")
+        return [(label, self.base_url + path) for path, label in seen.items()]
+
+    def category_page_url(self, seed_url: str, page: int) -> str:
+        return f"{seed_url}/{page}-40-3-0-0-0-grid-0-all-0.html"
