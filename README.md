@@ -486,6 +486,9 @@ tests/
   test_schema_migration.py  init_db() upgrades an existing database in place, not just fresh ones
   test_translate_fallback.py  a configured provider that's unreachable falls back to google_free
   test_bestbuy.py      field mapping against Best Buy's documented API shapes
+  test_browser_session.py  interactive_login() doesn't block images/fonts a human needs to see
+  test_fetch_json_auth.py  a JWT in local/session storage is auto-attached as a Bearer token
+                        (needs real Chromium -- skips cleanly without one, same as selftest --save-fixture)
   test_adapters.py     replay captured site HTML through the real adapters
   fixtures/<site>/     captured search.html + detail.html + manifest.json
 providers.yaml         API presets for the no-login route

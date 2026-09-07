@@ -296,14 +296,55 @@ class BrowserSession:
         """Call a site's own XHR endpoint from inside the page, so cookies and
         anti-bot tokens (and, for a profile set up via ``agent-login``, a real
         logged-in session) are attached by the browser itself rather than by a
-        plain HTTP client that was never signed in to anything."""
+        plain HTTP client that was never signed in to anything.
+
+        Cookies alone are not always the whole story: confirmed live on
+        USFans, whose own ``/api/goods/info`` call is authenticated with an
+        ``Authorization: Bearer <JWT>`` header its own JS attaches from
+        localStorage, not a cookie -- ``credentials: 'include'`` never sends
+        that, and the call 401s regardless of how genuinely logged-in the
+        profile is. Rather than hardcode USFans' storage key, this scans
+        local/session storage for anything JWT-shaped (three base64url
+        segments -- ``eyJ...`` is the near-universal fingerprint, since that's
+        the base64 of ``{"typ":`` or ``{"alg":``) and attaches the first match
+        as a Bearer token, unless the caller already supplied one.
+        """
         with self.page() as pg:
             if referer:
                 pg.goto(referer, wait_until="domcontentloaded")
                 self._assert_not_blocked(pg)
             return pg.evaluate(
                 """async ([u, h]) => {
-                    const r = await fetch(u, {credentials: 'include', headers: h || {}});
+                    h = Object.assign({}, h || {});
+                    if (!Object.keys(h).some(k => k.toLowerCase() === 'authorization')) {
+                        const jwtRe = /^eyJ[\\w-]+\\.[\\w-]+\\.[\\w-]+$/;
+                        const stores = [localStorage, sessionStorage];
+                        outer:
+                        for (const store of stores) {
+                            for (let i = 0; i < store.length; i++) {
+                                const raw = store.getItem(store.key(i));
+                                if (!raw) continue;
+                                // A token is sometimes stored bare, sometimes JSON-quoted
+                                // ('"eyJ..."') or nested one level ({"token":"eyJ..."}).
+                                let candidate = raw.trim();
+                                if (jwtRe.test(candidate)) { h['Authorization'] = 'Bearer ' + candidate; break outer; }
+                                try {
+                                    const parsed = JSON.parse(candidate);
+                                    if (typeof parsed === 'string' && jwtRe.test(parsed)) {
+                                        h['Authorization'] = 'Bearer ' + parsed; break outer;
+                                    }
+                                    if (parsed && typeof parsed === 'object') {
+                                        for (const v of Object.values(parsed)) {
+                                            if (typeof v === 'string' && jwtRe.test(v)) {
+                                                h['Authorization'] = 'Bearer ' + v; break outer;
+                                            }
+                                        }
+                                    }
+                                } catch (e) { /* not JSON, and not a bare JWT either -- skip */ }
+                            }
+                        }
+                    }
+                    const r = await fetch(u, {credentials: 'include', headers: h});
                     const t = await r.text();
                     try { return JSON.parse(t); } catch (e) { return {__raw: t}; }
                 }""",
