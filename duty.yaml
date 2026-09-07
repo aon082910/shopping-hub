@@ -16,8 +16,10 @@ enabled: true
 
 as_of: "2026-09-07"
 source: >
-  CBP rulings N361412 (2026-05-27) and HQ H348342 (2026-05-08), base HTS rates
-  only -- Section 301/trade-remedy surcharges NOT included, see note below.
+  CBP rulings N361412 (2026-05-27), HQ H348342 (2026-05-08), N363956
+  (2026-08-06), N363313 (2026-07-29), N363514 (2026-08-05), N363251
+  (2026-07-28), N363423 (2026-07-30) -- base HTS rates only, Section
+  301/trade-remedy surcharges NOT included, see note below.
 
 # Applied when no category rule matches. 0.0 means "no duty assumed".
 default_rate: 0.0
@@ -30,11 +32,17 @@ de_minimis_usd: null
 # Category path prefix -> ad valorem rate (0.075 = 7.5%). Longest prefix wins, so a
 # leaf rule beats its parent. Paths match the browse taxonomy in db/seed.py.
 by_category:
-  computers/usb-hubs-docks: 0.0   # HQ H348342: HTS 8471.80.10, general duty rate Free
+  computers/usb-hubs-docks: 0.0     # HQ H348342: USB hubs, HTS 8471.80.10, general duty rate Free
+  tools/measuring-test-equipment: 0.053  # N363956: tape measure, HTS 9017.80.0000
+  tools/hand-tools: 0.053           # N363313: tire repair kit, HTS 8205.59.5560
+  # Both N363514 (racing sim kit) and N363251 (huupe ARENA basketball
+  # tracker) independently land on the same HTS 9504.50.0000 ("video game
+  # consoles and machines... and parts/accessories"), Free.
+  toys/gaming-accessories: 0.0
+  packaging/shipping-supplies: 0.03  # N363423: polyethylene foam packaging inserts, HTS 3923.90.0080
   # electronics: 0.00
   # apparel: 0.16
   # apparel/shoes: 0.20
-  # tools: 0.03
 
 note: >
   Estimates only, and BASE HTS RATES ONLY -- Section 301 and any current

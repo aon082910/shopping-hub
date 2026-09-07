@@ -109,6 +109,17 @@ def run() -> int:
     # drifting this away from what was actually verified.
     check("usb-hubs-docks rate matches the sourced CBP ruling (HQ H348342)",
           table.rate_for("computers/usb-hubs-docks"), 0.0)
+    check("hand-tools rate matches the sourced CBP ruling (N363313)",
+          table.rate_for("tools/hand-tools"), 0.053)
+    check("measuring-test-equipment rate matches the sourced CBP ruling (N363956)",
+          table.rate_for("tools/measuring-test-equipment"), 0.053)
+    check("gaming-accessories rate matches two corroborating CBP rulings "
+          "(N363514, N363251)", table.rate_for("toys/gaming-accessories"), 0.0)
+    check("shipping-supplies rate matches the sourced CBP ruling (N363423)",
+          table.rate_for("packaging/shipping-supplies"), 0.03)
+    check("an unresearched tools subcategory still falls back to the default "
+          "rate, not the sibling hand-tools/measuring rate",
+          table.rate_for("tools/power-tools"), 0.0)
     check_true("as_of is a real, non-empty date stamp", table.as_of)
 
     print()
