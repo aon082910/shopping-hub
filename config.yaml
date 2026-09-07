@@ -199,14 +199,17 @@ sites:
     concurrency: 2
 
   temu:
-    # Disabled: search()/fetch_detail() are a stub (see scrapers/temu.py's
-    # docstring) -- confirmed live, an anonymous session gets redirected to a
-    # mandatory sign-in wall within seconds even for the plain homepage, so
-    # this needs a real logged-in account. Run
-    # `python -m sourcehub.cli browser-login --site temu` to log in once,
-    # then capture the real search endpoint/markup from that logged-in
-    # session before writing selectors, and flip this to true.
-    enabled: false
+    # Re-enabled 2026-09-07 -- built against a real HAR capture from a logged
+    # in session (see scrapers/temu.py's docstring): search() reads the first
+    # page of results straight out of window.rawData, no separate API call.
+    # Needs a real logged-in session either way (an anonymous one hits a
+    # mandatory sign-in wall within seconds) -- re-run
+    # `python -m sourcehub.cli browser-login --site temu` if this starts
+    # returning nothing (the saved session likely expired).
+    #
+    # NOT yet implemented: pagination past the first ~40 results per
+    # keyword, and fetch_detail() (no product-page capture yet).
+    enabled: true
     render: browser
     delay_seconds: 3.0
     concurrency: 1
