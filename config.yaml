@@ -108,10 +108,13 @@ sites:
     concurrency: 2
 
   globalsources:
-    # Disabled: the search page is a JS shell that yields no product cards
-    # even fully rendered. It previously 'worked' only because a too-broad
-    # selector was ingesting the site navigation as products.
-    enabled: false
+    # Re-enabled 2026-09-07: the earlier "JS shell, no cards" diagnosis was
+    # half right -- content does fully render (this needs render: browser),
+    # but the site rewrote its frontend as a Vue SPA and every one of the
+    # adapter's selectors (card wrapper, product URL shape, MOQ, supplier
+    # name, verified badge) was matching markup that no longer exists.
+    # Updated against the real live DOM in scrapers/globalsources.py.
+    enabled: true
     render: browser
     delay_seconds: 3.0
     concurrency: 1
@@ -122,7 +125,17 @@ sites:
     concurrency: 2
 
   gearbest:
-    enabled: true
+    # Disabled 2026-09-07, confirmed live: gearbest.ma sits behind a genuine
+    # Cloudflare Turnstile challenge ("Verify you are human"), not a passive
+    # block -- curl_cffi's TLS impersonation is already active (installed,
+    # confirmed in use) and still gets HTTP 403, and a real, headed browser
+    # (not headless scraping) hits the same interactive checkbox challenge.
+    # Not a selector or fingerprinting problem to code around; would need
+    # either a paid anti-bot-bypass proxy service or manual captcha solving,
+    # neither of which this adapter should silently automate. Re-run
+    # `selftest --site gearbest` occasionally to see if the site's posture
+    # has changed.
+    enabled: false
     delay_seconds: 2.5
     concurrency: 2
 
@@ -162,10 +175,14 @@ sites:
     concurrency: 1
 
   tomtop:
-    # Disabled: tomtop.com resets the TLS connection on every request,
-    # including its own homepage -- a site-level block or outage, not a
-    # selector problem. The adapter is written and correct; re-enable and run
-    # `selftest --site tomtop` to see whether it has come back.
+    # Disabled, re-confirmed 2026-09-07: tomtop.com refuses the TCP
+    # connection outright now (not just a TLS reset), confirmed across three
+    # independent networks (this project's own curl_cffi client, a separate
+    # browser sandbox, and Anthropic's own fetch infrastructure) -- a
+    # site-level outage or takedown, not anything specific to this project's
+    # network path or fingerprint. The adapter is written and correct;
+    # re-enable and run `selftest --site tomtop` to see whether it has come
+    # back.
     enabled: false
     delay_seconds: 2.5
     concurrency: 2

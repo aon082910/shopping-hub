@@ -46,8 +46,14 @@ class GlobalSourcesAdapter(SiteAdapter):
             # navigation, so the crawler happily ingested "Magazines" as a product.
             # A too-broad fallback that silently produces junk is worse than no
             # fallback: the junk reaches the catalog and has to be cleaned out.
+            #
+            # Confirmed live (2026-09-07): the site is now a Vue SPA (scoped
+            # data-v-* attrs) and none of the older selectors match at all --
+            # not a "JS shell with no cards" problem, the cards just moved to
+            # `li.card-box`. Kept the old candidates after it in case a
+            # redesign reintroduces one of those shapes.
             cards = self.select_cards(tree, [
-                "[class*='product-item']", ".prod-item", "div[data-product-id]",
+                "li.card-box", "[class*='product-item']", ".prod-item", "div[data-product-id]",
             ])
             if not cards:
                 return
@@ -60,16 +66,26 @@ class GlobalSourcesAdapter(SiteAdapter):
                     log.debug("[globalsources] bad card: %s", e)
 
     def _parse_card(self, card) -> Optional[RawOffer]:
-        link = card.css_first("a[href*='/product/'], a[href*='pdtl'], h2 a, a[class*='title']")
+        link = card.css_first(
+            "a[href*='/product/'], a[href*='pdtl'], h2 a, a[class*='title'], a"
+        )
         url = self.abs_url(link.attributes.get("href") if link else None)
         # The URL has to look like a product page. Without this a card that is
-        # really a nav block still yields a plausible-looking offer.
-        if not url or not any(m in url for m in ("/product/", "/pdtl", "/manufacturers/")):
+        # really a nav block still yields a plausible-looking offer. Confirmed
+        # live (2026-09-07): today's real product URLs look like
+        # ".../USB-hub/Docking-Station-1222238387p.htm" -- none of them contain
+        # "/product/", "/pdtl" or "/manufacturers/" any more, so that old check
+        # alone would reject every genuine listing on the page.
+        if not url or not (
+            any(m in url for m in ("/product/", "/pdtl", "/manufacturers/"))
+            or re.search(r"-\d{6,}p\.htm(?:$|[?#])", url)
+        ):
             return None
 
         title = clean(
-            (link.attributes.get("title") if link else "")
-            or self.text_of(card, "[class*='title'], h2")
+            self.attr_of(card, "[class*='product-name']", "title")
+            or (link.attributes.get("title") if link else "")
+            or self.text_of(card, "[class*='product-name'], [class*='title'], h2")
             or (link.text(strip=True) if link else "")
         )
         if not title:
@@ -81,12 +97,22 @@ class GlobalSourcesAdapter(SiteAdapter):
             or url.rstrip("/").rsplit("/", 1)[-1]
         )
 
-        price_text = self.text_of(card, "[class*='price']")
+        # Confirmed live: `[class*='price']` alone matches the *wrapper*
+        # div.price-info, whose text() then concatenates the price AND its
+        # sibling MOQ line with no separator ("US$ 7.50 - 7.60Min. order:
+        # 1000 Pieces") -- garbling the parse into a bogus price. Scoping to
+        # the actual price node avoids pulling in that sibling text.
+        price_text = self.text_of(card, "span.price, [class*='price-box'] [class*='price']")
         pmin, pmax, ccy = (None, None, "USD")
         if price_text and not NEGOTIABLE.search(price_text):
             pmin, pmax, ccy = parse_price(price_text, "USD")
 
-        moq, unit = parse_moq(self.text_of(card, "[class*='moq'], [class*='min-order']"))
+        # "Min. order: 1000 Pieces" now lives in a generic `.txt` node scoped
+        # under the price block -- confirmed live, its class carries no
+        # "moq"/"min-order" hint at all, unlike the markup this used to target.
+        moq, unit = parse_moq(self.text_of(
+            card, "[class*='price-info'] [class*='txt'], [class*='moq'], [class*='min-order']"
+        ))
 
         offer = RawOffer(
             site_key=self.key,
@@ -98,8 +124,21 @@ class GlobalSourcesAdapter(SiteAdapter):
             price_max=pmax,
             moq=moq,
             moq_unit=unit,
-            seller_name=clean(self.text_of(card, "[class*='supplier'], [class*='company']")) or None,
-            is_verified_supplier=bool(card.css_first("[class*='verified'], [class*='audited']")),
+            seller_name=clean(
+                self.text_of(card, "[class*='o2o-name'] [class*='link-el']")
+                or self.text_of(card, "[class*='supplier'], [class*='company']")
+            ) or None,
+            # Confirmed live: the "verified" badge is now an <img alt="Verified
+            # Maufacturer"> [sic -- the site's own typo] (classes are generic,
+            # e.g. "gs-tag vImg vm", and tell you nothing on their own) --
+            # match on alt text instead of class. selectolax's `i` (case-
+            # insensitive) selector flag confirmed NOT to work in this version
+            # (tested directly), so this only matches this exact casing --
+            # good enough since it's the real, confirmed-live text.
+            is_verified_supplier=bool(
+                card.css_first("img[alt*='Verified']")
+                or card.css_first("[class*='verified'], [class*='audited']")
+            ),
             raw={"source": "search", "price_text": price_text},
         )
         if price_text and NEGOTIABLE.search(price_text):
