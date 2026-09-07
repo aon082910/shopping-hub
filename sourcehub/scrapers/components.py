@@ -18,6 +18,7 @@ one it says so and returns nothing rather than scraping a site whose terms forbi
 from __future__ import annotations
 
 import logging
+import re
 from typing import Iterator, Optional
 from urllib.parse import quote_plus
 
@@ -58,15 +59,64 @@ class LcscAdapter(SiteAdapter):
         }
 
     def search(self, keyword: str, max_pages: int | None = None) -> Iterator[RawOffer]:
-        for page in range(1, (max_pages or self.max_pages) + 1):
+        yield from self._paged_query(
+            {"keyword": keyword}, max_pages or self.max_pages, context=repr(keyword)
+        )
+
+    # Confirmed live 2026-09-08: the sitewide nav menu (present on every page,
+    # including the plain homepage) embeds every category link in the tree --
+    # top-level down to leaf -- as ``<a href=".../category/<id>.html" ...
+    # aria-label="<name> category">``, 576 of them on a cold fetch. There is no
+    # separate "is this a leaf" flag; passing a *non-leaf* id to SEARCH_API's
+    # catalogIdList comes back with totalRow=0 (confirmed against a known
+    # parent id), which is indistinguishable from "ran out of pages" -- so
+    # crawl_category() below doesn't need to tell leaves apart from branches
+    # at all, it just tries every id and the existing "no items -> stop" logic
+    # quietly skips the ones that were never leaves.
+    CATEGORY_LINK_RE = re.compile(
+        r'href="https://www\.lcsc\.com/category/(\d+)\.html"[^>]*aria-label="([^"]+?)\s*category"'
+    )
+
+    def category_seeds(self) -> list[tuple[str, str]]:
+        try:
+            html = self.fetcher.get(self.base_url + "/").text
+        except Exception as e:
+            log.warning("[lcsc] category discovery failed: %s", e)
+            return []
+        seen: dict[str, str] = {}
+        for cid, label in self.CATEGORY_LINK_RE.findall(html):
+            seen.setdefault(cid, clean(label))
+        if not seen:
+            log.warning("[lcsc] no category links found on the homepage -- "
+                        "its nav markup has likely changed.")
+        # The seed "url" is the catalog id, not a browsable page -- LCSC's
+        # anonymous listing lives behind SEARCH_API, keyed on that id.
+        return [(label, cid) for cid, label in seen.items()]
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        try:
+            catalog_id = int(seed_url)
+        except (TypeError, ValueError):
+            return
+        # LCSC's own API caps results at 5000/category (pageSize x totalPage) --
+        # a real limit of the anonymous endpoint, not something to fake past.
+        yield from self._paged_query(
+            {"keyword": "", "catalogIdList": [catalog_id]},
+            max_pages or 200, context=f"catalog {catalog_id}",
+        )
+
+    def _paged_query(
+        self, body_extra: dict, max_pages: int, *, context: str
+    ) -> Iterator[RawOffer]:
+        for page in range(1, max_pages + 1):
             try:
                 payload = self.fetcher.post(
                     self.SEARCH_API,
-                    json_body={"keyword": keyword, "currentPage": page, "pageSize": 25},
+                    json_body={"currentPage": page, "pageSize": 25, **body_extra},
                     headers=self.extra_headers(),
                 ).json()
             except Exception as e:
-                log.warning("[lcsc] search page %s failed: %s", page, e)
+                log.warning("[lcsc] page %s failed for %s: %s", page, context, e)
                 return
 
             # LCSC answers HTTP 200 with an application-level error body. Treating
@@ -88,7 +138,7 @@ class LcscAdapter(SiteAdapter):
                 or []
             )
             if not items:
-                log.info("[lcsc] no items on page %s for %r", page, keyword)
+                log.info("[lcsc] no items on page %s for %s", page, context)
                 return
             for item in items:
                 offer = self._offer(item)
