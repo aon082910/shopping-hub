@@ -89,6 +89,15 @@ def run() -> int:
         check_true("still collapsed to one link despite the www. mismatch",
                    len(native_links) == 1)
 
+        print("\n1688 is unaffected -- its URL is a real, cross-agent-compatible one")
+        offer_1688 = _make_offer(
+            session, "1688", "https://detail.1688.com/offer/1041786306896.html", "1688-1"
+        )
+        links_1688 = build_agent_links(session, offer_1688)
+        check_true("full multi-agent list, not collapsed to one", len(links_1688) > 1)
+        check_true("usfans is still one of the options",
+                   any(l.key == "usfans" for l in links_1688))
+
     print("\n" + "=" * 62)
     if FAILS:
         print(f"{len(FAILS)} FAILURES")

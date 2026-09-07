@@ -717,6 +717,48 @@ def test_usfans_search_is_a_post_with_a_json_body():
         agents_module.agent_browser_session = original
 
 
+def test_usfans_1688_search_uses_the_real_numeric_item_id():
+    """Unlike taobao/tmall, confirmed live: USFans' 1688 goodsId IS the
+    genuine numeric 1688 offer id, not an opaque token -- a real
+    detail.1688.com URL built from one landed on the correct item in a
+    browser. 1688's item_url_template therefore builds a real, cross-agent-
+    compatible URL rather than USFans' own product page.
+    """
+    print("\nusfans: 1688 search results carry a real, reusable numeric item id")
+    import sourcehub.agents as agents_module
+
+    search_session = _FakeAgentSession(
+        {"code": 200, "msg": "操作成功", "success": True, "data": {
+            "records": [{
+                "goodsId": "1041786306896",
+                "title": "[Four Headphones] New Wireless Bluetooth Earphones, "
+                         "Ear-Clip Style, Semi-In-Ear,",
+                "image": "https://cbu01.alicdn.com/img/ibank/earbuds.jpg",
+                "price": 28.5, "priceCurrency": 4.74, "monthSold": 0,
+                "channel": 1, "shopId": None, "inventory": 200,
+                "discountPrice": None, "discountPriceCurrency": None,
+                "goodsLabelType": 1,
+            }],
+            "total": "20", "size": "20", "current": "1", "pages": "1",
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: search_session
+    try:
+        client = ProviderClient("usfans", "1688", FakeFetcher({}),
+                                base_url="https://www.usfans.com")
+        offers = list(client.search("bluetooth earbuds", page=1))
+
+        check("body carries 1688's provider_code (channel=1)",
+              search_session.calls[0]["body"]["channel"], "1")
+        check("one record mapped", len(offers), 1)
+        check("url is a real, cross-agent-compatible detail.1688.com URL "
+              "built from the genuine numeric id -- not a USFans-only link",
+              offers[0].url, "https://detail.1688.com/offer/1041786306896.html")
+    finally:
+        agents_module.agent_browser_session = original
+
+
 def test_usfans_search_origin_detail_skips_resolve():
     """Enrichment of a search-discovered item must NOT run `resolve` -- the
     item's goodsId is already USFans' own native id (confirmed live: it works
@@ -929,6 +971,7 @@ def main() -> int:
                test_hybrid_detail_flow, test_detail_provider_merges_variants_onto_the_search_stage_offer,
                test_via_agent_login_routes_through_a_browser_session,
                test_usfans_resolve_then_detail, test_usfans_search_is_a_post_with_a_json_body,
+               test_usfans_1688_search_uses_the_real_numeric_item_id,
                test_usfans_search_origin_detail_skips_resolve,
                test_usfans_multi_sku_item_a_real_login_actually_returned,
                test_usfans_detailurl_populated_but_wrong_is_not_trusted,

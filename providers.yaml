@@ -237,20 +237,26 @@ providers:
   # account: resolve, detail (including a real 40-variant multi-SKU listing),
   # and keyword search all confirmed against genuine responses.
   #
-  # IMPORTANT, confirmed with two independent live captures -- one via `resolve`
-  # on an externally-supplied real Taobao URL, one via a native search result
-  # with no external URL involved at all: USFans NEVER exposes the source
-  # site's real item id anywhere in its own API. `detailUrl` always comes back
-  # built from an opaque, non-numeric token, not the plain numeric Taobao id
-  # (e.g. `id=CgrjeQOx4IkZAW-qY7fZZW_dHOGze7yyBfK9zig`, not `id=1075605616467`).
-  # This looks deliberate -- it stops a buyer from cutting the agent out and
-  # going straight to Taobao. Practical effect: there is no way to recover a
-  # genuine, cross-agent-compatible source URL for anything discovered through
-  # USFans' own search. `item_url_template` below points at USFans' *own*
-  # product page instead (the one link that is actually real and clickable),
-  # not the source site -- see build_agent_links() in agents.py, which detects
-  # this and shows a single "continue on USFans" link rather than wrapping a
+  # IMPORTANT, taobao/tmall only, confirmed with two independent live captures
+  # -- one via `resolve` on an externally-supplied real Taobao URL, one via a
+  # native search result with no external URL involved at all: USFans NEVER
+  # exposes those two sites' real item id anywhere in its own API. `detailUrl`
+  # always comes back built from an opaque, non-numeric token, not the plain
+  # numeric Taobao id (e.g. `id=CgrjeQOx4IkZAW-qY7fZZW_dHOGze7yyBfK9zig`, not
+  # `id=1075605616467`). This looks deliberate -- it stops a buyer from
+  # cutting the agent out and going straight to Taobao. Practical effect:
+  # there is no way to recover a genuine, cross-agent-compatible source URL
+  # for a taobao/tmall item discovered through USFans' own search.
+  # `item_url_template` for those two sites points at USFans' *own* product
+  # page instead (the one link that is actually real and clickable), not the
+  # source site -- see build_agent_links() in agents.py, which detects this
+  # and shows a single "continue on USFans" link rather than wrapping a
   # usfans.com URL into every forwarding agent's "paste a link" tool.
+  #
+  # 1688 does NOT have this problem -- confirmed live, its goodsId IS the
+  # genuine numeric 1688 offer id, and a real detail.1688.com URL built from
+  # it lands on the correct item. 1688's item_url_template uses that real URL,
+  # so 1688 offers get the normal full cross-agent comparison.
   #
   # Two-step for *detail-by-URL* lookups (e.g. a real Taobao URL a browser
   # crawl discovered): USFans' detail endpoint won't accept a source site's own
@@ -279,7 +285,12 @@ providers:
       "1688":
         provider_code: "1"
         currency: CNY
-        item_url_template: "https://usfans.com/product/1/{id}"
+        # Unlike taobao/tmall, confirmed live: USFans' 1688 goodsId IS the
+        # genuine numeric 1688 offer id, not an opaque token -- a real
+        # detail.1688.com URL built from it landed on the correct item.
+        # 1688 offers therefore get the full cross-agent buy-link comparison
+        # (build_agent_links in agents.py), not just a single USFans link.
+        item_url_template: "https://detail.1688.com/offer/{id}.html"
 
     resolve:
       path: "/api/goods/short-link/parser"
