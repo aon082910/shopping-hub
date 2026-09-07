@@ -112,6 +112,51 @@ def _usfans(url: str, site_key: str, ref: str) -> str:
     return "https://www.usfans.com/?" + urlencode(params)
 
 
+def _cnfans(url: str, site_key: str, ref: str) -> str:
+    # Confirmed live: pasting a real source URL into CNFans' own search box
+    # lands directly on ".../product?id=<real id>&platform=<TAOBAO|ALI_1688>
+    # &productUrl=<the real url>&productPwd=" -- no resolve step, no
+    # obfuscated id, unlike USFans. taobao and tmall share platform=TAOBAO.
+    item_id = item_id_from_url(url, site_key) or ""
+    platform = "ALI_1688" if site_key == "1688" else "TAOBAO"
+    params = {"id": item_id, "platform": platform, "productUrl": url, "productPwd": ""}
+    if ref:
+        params["ref"] = ref
+    return "https://cnfans.com/product?" + urlencode(params)
+
+
+def _greetbuy(url: str, site_key: str, ref: str) -> str:
+    # No URL format was found live that lands a human straight on the
+    # resolved item (its own search box's "paste a link" flow didn't trigger
+    # under automation, and re-running it as a plain query param just did a
+    # literal keyword search instead) -- home with the link pre-filled is
+    # the same honest fallback _usfans() uses for the same reason.
+    params = {"url": url}
+    if ref:
+        params["ref"] = ref
+    return "https://www.greetbuy.com/?" + urlencode(params)
+
+
+def _buckydrop(url: str, site_key: str, ref: str) -> str:
+    # Same honest fallback as _greetbuy() -- BuckyDrop's own search works
+    # (confirmed live, see scrapers/buckydrop.py), but no direct "paste a
+    # link and land on the resolved item" URL format was confirmed.
+    params = {"url": url}
+    if ref:
+        params["ref"] = ref
+    return "https://www.buckydrop.com/en/sourcing?" + urlencode(params)
+
+
+def _parcelup(url: str, site_key: str, ref: str) -> str:
+    # Same honest fallback -- ParcelUp's own /shop/ sits behind a genuine
+    # Cloudflare Turnstile challenge (confirmed live), so there was no page
+    # to even test a direct-link format against.
+    params = {"url": url}
+    if ref:
+        params["ref"] = ref
+    return "https://parcelup.com/shop/?" + urlencode(params)
+
+
 BUILDERS = {
     "superbuy": _superbuy,
     "wegobuy": _wegobuy,
@@ -119,6 +164,10 @@ BUILDERS = {
     "sugargoo": _sugargoo,
     "hagobuy": _hagobuy,
     "usfans": _usfans,
+    "cnfans": _cnfans,
+    "greetbuy": _greetbuy,
+    "buckydrop": _buckydrop,
+    "parcelup": _parcelup,
 }
 
 

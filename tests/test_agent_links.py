@@ -26,7 +26,7 @@ os.environ["SOURCEHUB_MEDIA_DIR"] = str(_TMP / "media")
 
 from sqlalchemy import select  # noqa: E402
 
-from sourcehub.agents import build_agent_links  # noqa: E402
+from sourcehub.agents import BUILDERS, build_agent_links  # noqa: E402
 from sourcehub.db.models import Offer, Site  # noqa: E402
 from sourcehub.db.session import init_db, session_scope  # noqa: E402
 
@@ -97,6 +97,31 @@ def run() -> int:
         check_true("full multi-agent list, not collapsed to one", len(links_1688) > 1)
         check_true("usfans is still one of the options",
                    any(l.key == "usfans" for l in links_1688))
+
+    print("\nnew agent builders (2026-09-07): exact formats, confirmed vs. fallback")
+    real_taobao_url = "https://item.taobao.com/item.htm?id=1075605616467"
+    real_1688_url = "https://detail.1688.com/offer/678901234.html"
+
+    # CNFans: confirmed live -- pasting a real URL resolves directly to the
+    # real id/url, no opaque token the way USFans needs.
+    check("cnfans taobao link uses the confirmed real format",
+          BUILDERS["cnfans"](real_taobao_url, "taobao", ""),
+          "https://cnfans.com/product?id=1075605616467&platform=TAOBAO&"
+          "productUrl=https%3A%2F%2Fitem.taobao.com%2Fitem.htm%3Fid%3D1075605616467&productPwd=")
+    check_true("cnfans 1688 link uses platform=ALI_1688 (confirmed live, distinct "
+              "from taobao/tmall's TAOBAO)",
+              "platform=ALI_1688" in BUILDERS["cnfans"](real_1688_url, "1688", ""))
+    check_true("cnfans appends a ref code when configured",
+              "ref=aff123" in BUILDERS["cnfans"](real_taobao_url, "taobao", "aff123"))
+
+    # GreetBuy, BuckyDrop, ParcelUp: no direct-link format was confirmed live
+    # (Cloudflare wall for ParcelUp, automation couldn't trigger it for the
+    # other two) -- same honest home-page-prefilled fallback _usfans() uses.
+    for key, domain in [("greetbuy", "greetbuy.com"), ("buckydrop", "buckydrop.com"),
+                        ("parcelup", "parcelup.com")]:
+        link = BUILDERS[key](real_taobao_url, "taobao", "")
+        check_true(f"{key} falls back to its own domain with the url pre-filled",
+                  domain in link and "url=" in link)
 
     print("\n" + "=" * 62)
     if FAILS:

@@ -297,6 +297,56 @@ AGENTS = [
         sort_order=60,
     ),
     dict(
+        key="cnfans",
+        name="CNFans",
+        home_url="https://cnfans.com/",
+        url_template="https://cnfans.com/product?id={id}&platform=TAOBAO&productUrl={url}{ref}",
+        supported_site_keys=["taobao", "tmall", "1688"],
+        service_fee_note="Tiered service fee; also does Weidian, not otherwise sourced here.",
+        notes="Confirmed live: its own keyword search (search-api/detail/keywords-search-list) "
+        "works fully anonymously, no login -- see scrapers/cnfans.py. Unlike USFans, a pasted "
+        "source URL resolves directly to the real item id/url, no opaque token.",
+        sort_order=65,
+    ),
+    dict(
+        key="greetbuy",
+        name="Greetbuy",
+        home_url="https://www.greetbuy.com/",
+        url_template="https://www.greetbuy.com/?url={url}{ref}",
+        supported_site_keys=["taobao", "tmall", "1688"],
+        service_fee_note="0 service fee on 1688 self-service orders.",
+        notes="Confirmed live: its own keyword search (gateway/alibabaSDK/global/goods_list.php) "
+        "works fully anonymously, no login, no session -- see scrapers/greetbuy.py. No "
+        "direct-link buy format confirmed live, so its agent link falls back to its "
+        "homepage with the source URL pre-filled.",
+        sort_order=70,
+    ),
+    dict(
+        key="buckydrop",
+        name="BuckyDrop",
+        home_url="https://www.buckydrop.com/",
+        url_template="https://www.buckydrop.com/en/sourcing?url={url}{ref}",
+        supported_site_keys=["taobao", "tmall", "1688"],
+        service_fee_note="Dropshipping-oriented (per-order processing/fulfillment fees), not a "
+        "simple flat service fee -- see their site for current pricing.",
+        notes="Confirmed live: its own keyword search returns real results with no login, but "
+        "only inside a real browser session (a plain HTTP request gets '没有登录' / "
+        "'not logged in' even with cookies) -- see scrapers/buckydrop.py.",
+        sort_order=75,
+    ),
+    dict(
+        key="parcelup",
+        name="Parcel Up",
+        home_url="https://parcelup.com/",
+        url_template="https://parcelup.com/shop/?url={url}{ref}",
+        supported_site_keys=["taobao", "tmall"],
+        service_fee_note="No commission on item price or shipping (per their own site copy).",
+        notes="Taobao-branded specifically (no confirmed 1688 support). Its /shop/ catalog "
+        "sits behind a genuine Cloudflare Turnstile challenge (confirmed live) -- not usable "
+        "as a discovery source, agent link only.",
+        sort_order=80,
+    ),
+    dict(
         key="direct",
         name="Order direct (no agent needed)",
         home_url="",
