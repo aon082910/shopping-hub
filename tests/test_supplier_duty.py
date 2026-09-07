@@ -84,14 +84,32 @@ def run() -> int:
         check("years retained", rocketek.years_active, 9)
 
     print()
-    print("duty is off unless configured")
+    print("duty ships off by default (a fresh DutyTable, not the project's own "
+          "duty.yaml -- that file now carries real user-supplied rates, see "
+          "below, and load_duty_table() has no way to override its path)")
+    check("ships disabled", DutyTable().enabled, False)
+    check("estimates nothing", DutyTable().estimate(100.0, "apparel"), (None, None))
+
+    print()
+    print("the project's live duty.yaml is wired into the real ingest pipeline")
     table = load_duty_table()
-    check("ships disabled", table.enabled, False)
-    check("estimates nothing", table.estimate(100.0, "apparel"), (None, None))
+    check_true("duty.yaml is enabled with real, sourced rates", table.enabled)
     with session_scope() as s:
         o = s.scalar(select(Offer).where(Offer.site_product_id == "s1"))
-        check("no duty recorded", o.duty_usd, None)
-        check("landed cost excludes duty", o.landed_cost_usd, 9.0)
+        # s1 has no category set at all (the `offer()` helper above never sets
+        # one), so it falls through to default_rate -- 0.0 today, but a
+        # computed 0.0 (duty considered, just zero), not None (duty excluded
+        # entirely), now that duty.yaml is enabled.
+        check("duty computed at the default rate for an uncategorized offer",
+              o.duty_usd, 0.0)
+        check("landed cost still excludes a $0 duty the same as no duty",
+              o.landed_cost_usd, 9.0)
+    # Locks in the sourced rate itself -- HQ H348342: USB hubs classify under
+    # HTS 8471.80.10, general duty rate Free. Catches a future edit silently
+    # drifting this away from what was actually verified.
+    check("usb-hubs-docks rate matches the sourced CBP ruling (HQ H348342)",
+          table.rate_for("computers/usb-hubs-docks"), 0.0)
+    check_true("as_of is a real, non-empty date stamp", table.as_of)
 
     print()
     print("duty when configured")
