@@ -445,6 +445,58 @@ def test_hybrid_detail_flow():
     check_true("no browser was ever started", adapter._browser is None)
 
 
+def test_detail_provider_merges_variants_onto_the_search_stage_offer():
+    """_detail_provider() merged specs/tiers from the enriched offer onto the
+    search-stage one but never variants or price_max -- invisible until now
+    because USFans is the first preset whose to_offer() actually populates
+    RawOffer.variants (see providers.yaml's usfans `variants:` mapping).
+    Confirmed for real: a live crawl enriched 30 offers through USFans and
+    every one came back with variant_count=0 despite `detail()` mapping
+    variants correctly on its own (per the tests above) -- the bug was
+    specifically in this merge step, not in the mapping.
+    """
+    print("\n_detail_provider merges variants (and price_max) onto the search-stage offer")
+    import sourcehub.agents as agents_module
+    from sourcehub.scrapers.base import RawOffer
+
+    detail_session = _FakeAgentSession(
+        {"code": 200, "success": True, "data": {
+            "goodsId": "native-id-1", "titleEn": "Test Jacket",
+            "detailUrl": None, "price": 0, "convertedPrice": 0,
+            "properties": [{"propId": "1", "propNameEn": "Color", "valuesList": [
+                {"valueId": "101", "valueNameEn": "Black"},
+                {"valueId": "102", "valueNameEn": "Navy"},
+            ]}],
+            "skuList": [
+                {"skuId": "sku-1", "price": 29.9, "stock": 5, "valueIds": ["1:101"]},
+                {"skuId": "sku-2", "price": 31.5, "stock": 0, "valueIds": ["1:102"]},
+            ],
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: detail_session
+    try:
+        _with_key("test-key")
+        adapter = _adapter("taobao", driver="provider", provider_preset="usfans")
+        # A shallow offer as produced by provider *search* discovery -- no
+        # variants/specs yet, those only come from detail.
+        native_url = "https://usfans.com/product/2/native-id-1"
+        offer = RawOffer(
+            site_key="taobao", site_product_id="native-id-1",
+            url=native_url, title="Test Jacket", currency="CNY", price_min=None,
+        )
+        enriched = adapter.fetch_detail(offer)
+
+        check_true("enriched via provider", enriched.detail_fetched)
+        check("two variants merged onto the search-stage offer", len(enriched.variants), 2)
+        check("variant attrs resolved", enriched.variants[0].attrs, {"Color": "Black"})
+        check("price_min derived from variants merged onto the offer",
+              enriched.price_min, 29.9)
+        check("price_max also merged (not just price_min)", enriched.price_max, 31.5)
+    finally:
+        agents_module.agent_browser_session = original
+
+
 # ------------------------------------------------------- via_agent_login routing
 
 
@@ -874,7 +926,8 @@ def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
                test_driver_resolution, test_no_key_preset_still_activates_the_provider,
-               test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
+               test_hybrid_detail_flow, test_detail_provider_merges_variants_onto_the_search_stage_offer,
+               test_via_agent_login_routes_through_a_browser_session,
                test_usfans_resolve_then_detail, test_usfans_search_is_a_post_with_a_json_body,
                test_usfans_search_origin_detail_skips_resolve,
                test_usfans_multi_sku_item_a_real_login_actually_returned,

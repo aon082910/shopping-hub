@@ -349,6 +349,10 @@ class _AlibabaCNBase(SiteAdapter):
                 setattr(offer, field, value)
         if enriched.specs:
             offer.specs = enriched.specs
+        if enriched.variants:
+            # Search-stage discovery never has per-SKU pricing/options -- only
+            # detail (e.g. USFans' skuList) does.
+            offer.variants = enriched.variants
         if enriched.tiers:
             offer.tiers = enriched.tiers
             offer.moq = min(t.min_qty for t in enriched.tiers)
@@ -359,6 +363,7 @@ class _AlibabaCNBase(SiteAdapter):
                 offer.image_urls.append(u)
         if enriched.price_min is not None and not offer.tiers:
             offer.price_min = enriched.price_min
+            offer.price_max = enriched.price_max
             offer.currency = enriched.currency
         offer.fees_note = offer.fees_note or enriched.fees_note
         offer.detail_fetched = True
