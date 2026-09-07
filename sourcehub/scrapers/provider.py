@@ -331,13 +331,28 @@ class ProviderClient:
             node = node[0] if node else None
         if not node:
             return None
-        offer = self.to_offer(node, detail=True)
+        # `url` here is still the real URL this was called with -- resolve only
+        # ever reassigns `item_id`, never `url` -- so it's the right fallback
+        # when the response's own url field is empty or (as with USFans'
+        # opaque goodsId) would reconstruct into a URL that goes nowhere.
+        offer = self.to_offer(node, detail=True, fallback_url=url)
         if offer:
             offer.detail_fetched = True
         return offer
 
-    def to_offer(self, item: dict, detail: bool = False) -> Optional[RawOffer]:
-        """Map one provider record onto RawOffer using the preset's field paths."""
+    def to_offer(
+        self, item: dict, detail: bool = False, fallback_url: str = "",
+    ) -> Optional[RawOffer]:
+        """Map one provider record onto RawOffer using the preset's field paths.
+
+        ``fallback_url``: the real URL this lookup was actually called with, if
+        the caller has one. Matters specifically for a preset with a ``resolve``
+        step (USFans): the id it maps back (``goodsId``) can be an opaque
+        per-request token, not the source site's real item id -- reconstructing
+        a URL from ``item_url_template`` with *that* id produces a URL that goes
+        nowhere. The real URL the lookup started from is always correct; prefer
+        it over guessing when the response's own url field is empty.
+        """
         f = (self.preset.get("map", {}) or {}).get("item", {}) or {}
         if not isinstance(item, dict):
             return None
@@ -352,16 +367,24 @@ class ProviderClient:
             "currency", "CNY"
         )
         price = as_float(dig(item, f.get("price")))
-        if price is None:
+        if not price:
             # Some vendors only give a formatted string ("¥18.50" / "18.50 CNY").
             price, _, parsed_ccy = parse_price(str(dig(item, f.get("price_text"), "")), currency)
             currency = parsed_ccy or currency
+        # A multi-SKU listing routinely reports 0 (or nothing at all) at the top
+        # level -- the real price lives per-SKU. Zero is not a price: it would
+        # win every cheapest-price comparison in the catalog, so treat it the
+        # same as "not disclosed" rather than as a genuinely free item.
+        if not price:
+            price = None
 
         # Providers hand back protocol-relative ("//item.taobao.com/...") and
         # occasionally relative URLs. Normalize to absolute: this value is stored,
         # linked, and URL-encoded into forwarding-agent deep links, all of which
         # break on a bare "//" prefix.
         url = _https(str(dig(item, f.get("url"), "") or ""))
+        if not url and fallback_url:
+            url = fallback_url
         if not url:
             template = self.site_cfg.get("item_url_template", "")
             url = template.replace("{id}", item_id) if template else ""
@@ -514,7 +537,7 @@ def _probe_detail(client: "ProviderClient", preset_name: str, site_key: str, ite
     node = dig(raw_payload, mapping.get("detail_path")) or raw_payload
     if isinstance(node, list):
         node = node[0] if node else None
-    offer = client.to_offer(node, detail=True) if node else None
+    offer = client.to_offer(node, detail=True, fallback_url=item_url) if node else None
 
     return {
         "preset": preset_name,

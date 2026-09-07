@@ -294,8 +294,22 @@ providers:
       item:
         id: ["goodsId"]
         title: ["titleEn", "title"]
+        # `detailUrl` is confirmed null on at least some real items -- the
+        # generic id-into-url_template fallback in to_offer() would otherwise
+        # reconstruct a broken URL from this preset's own opaque `goodsId`, so
+        # it now prefers the real URL the lookup was actually called with
+        # instead. See provider.py's to_offer()/detail() for that.
         url: ["detailUrl"]
-        price: ["convertedPrice", "price"]
+        # `price` (raw CNY) preferred over `convertedPrice`: this project keeps
+        # every offer in its native currency and converts once, centrally, in
+        # the ingest pipeline -- taking an already-converted number here would
+        # both bypass that and disagree with it if USFans' own rate differs.
+        # NOTE (confirmed live): a multi-SKU listing reports 0 for both fields
+        # at this top level -- the real price is per-SKU, in `skuList`, whose
+        # shape has not been captured yet. Until that's mapped, such listings
+        # come through with no price rather than a wrong one (to_offer()
+        # treats a mapped 0 the same as "not disclosed").
+        price: ["price", "convertedPrice"]
         currency: ["currency"]
         image: ["images[0]"]
         images: ["images[]"]

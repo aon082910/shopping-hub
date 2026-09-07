@@ -569,12 +569,61 @@ def test_usfans_resolve_then_detail():
     check("no resolved id -> no offer, not an exception", result, None)
 
 
+def test_usfans_multi_sku_item_a_real_login_actually_returned():
+    """Two bugs found running against a real, successfully authenticated
+    USFans response (not a fabrication -- this is what a real multi-SKU
+    Taobao listing actually sent back once login worked): detailUrl is null,
+    and price/convertedPrice are both 0 because the real price is per-SKU.
+    Both used to produce a genuinely broken offer (a URL built from an opaque
+    id that goes nowhere, and a $0.00 "price" that would win every
+    cheapest-price comparison in the catalog) rather than a merely incomplete
+    one.
+    """
+    print("\nusfans: a real multi-SKU response with a null detailUrl and a "
+          "placeholder 0 price")
+    import sourcehub.agents as agents_module
+
+    resolve_fetcher = FakeFetcher(
+        {"code": 200, "data": {"itemNo": "qrEfh2Xg37nnf9l_3lpnTfyLteaF4R9wRsOcG2OdBfIe_jgcfp-VFGs"},
+         "success": True}
+    )
+    # Trimmed to the fields that matter for this test; the real response also
+    # carries categoryName/skuList/properties/etc., none of which change the
+    # two things under test here.
+    detail_session = _FakeAgentSession(
+        {"code": 200, "msg": "操作成功", "success": True, "data": {
+            "goodsId": "lU3jD8xO6rYGeF6VorxEuriL3o_Wd34GiWpllUwsjsol-xzPP8wTDP8",
+            "title": "汽车后备箱收纳盒防水折叠可爱卡通收纳袋车内用品",
+            "titleEn": "Car Trunk Storage Box Waterproof Foldable Cute Cartoon Storage Bag",
+            "detailUrl": None, "price": 0, "convertedPrice": 0,
+            "images": ["https://cbu01.alicdn.com/img/a.jpg"],
+            "shopName": "某某店铺", "shopNameEn": None,
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: detail_session
+    try:
+        client = ProviderClient("usfans", "taobao", resolve_fetcher,
+                                base_url="https://www.usfans.com")
+        real_url = "https://item.taobao.com/item.htm?id=1075605616467"
+        offer = client.detail("1075605616467", url=real_url)
+        check_true("offer still mapped despite the missing price", offer is not None)
+        check("url falls back to the real one it was called with, "
+              "not a reconstruction from the opaque goodsId", offer.url, real_url)
+        check("a top-level 0 is treated as 'not disclosed', not a real price",
+              offer.price_min, None)
+        check("title still maps normally", offer.title, "Car Trunk Storage Box Waterproof "
+              "Foldable Cute Cartoon Storage Bag")
+    finally:
+        agents_module.agent_browser_session = original
+
+
 def main() -> int:
     for fn in (test_dig, test_otapi_mapping, test_rapidapi_mapping, test_url_fallback,
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
                test_driver_resolution,
                test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
-               test_usfans_resolve_then_detail):
+               test_usfans_resolve_then_detail, test_usfans_multi_sku_item_a_real_login_actually_returned):
         fn()
     print("\n" + "=" * 62)
     if FAILS:
