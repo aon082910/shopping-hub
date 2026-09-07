@@ -270,20 +270,20 @@ class ProviderClient:
             # Some agents show real pricing/results only to a signed-in account;
             # a plain HTTP client has no session at all and can never reach that.
             # Routes through a real browser bound to the profile `agent-login`
-            # set up, so the fetch actually carries that login's cookies. GET
-            # only -- an agent's own lookup endpoint is what this exists for,
-            # and that's what agent_lookup declares.
-            if method != "GET":
-                raise ProviderError(
-                    f"provider {self.preset_name!r} sets via_agent_login but its "
-                    f"{section!r} section uses {method}; only GET is supported "
-                    f"through an agent's browser session"
-                )
+            # set up, so the fetch actually carries that login's cookies.
+            # Confirmed live (USFans' keyword search): an agent's own endpoint
+            # can just as well be a POST with a JSON body, not only GET.
             from ..agents import agent_browser_session
 
-            full_url = url + ("?" + urlencode(params) if params else "")
+            if method == "GET":
+                full_url = url + ("?" + urlencode(params) if params else "")
+                with agent_browser_session(agent_key) as session:
+                    return session.fetch_json(full_url, referer=self.base_url, headers=headers)
             with agent_browser_session(agent_key) as session:
-                return session.fetch_json(full_url, referer=self.base_url, headers=headers)
+                return session.fetch_json(
+                    url, referer=self.base_url, headers=headers,
+                    method=method, body=_expand(spec.get("body"), ctx),
+                )
 
         if method == "POST":
             resp = self.fetcher.post(url, json_body=_expand(spec.get("body"), ctx),

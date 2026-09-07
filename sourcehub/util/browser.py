@@ -292,6 +292,7 @@ class BrowserSession:
 
     def fetch_json(
         self, url: str, *, referer: str | None = None, headers: dict[str, str] | None = None,
+        method: str = "GET", body: object = None,
     ) -> object:
         """Call a site's own XHR endpoint from inside the page, so cookies and
         anti-bot tokens (and, for a profile set up via ``agent-login``, a real
@@ -314,7 +315,7 @@ class BrowserSession:
                 pg.goto(referer, wait_until="domcontentloaded")
                 self._assert_not_blocked(pg)
             return pg.evaluate(
-                """async ([u, h]) => {
+                """async ([u, h, m, b]) => {
                     h = Object.assign({}, h || {});
                     if (!Object.keys(h).some(k => k.toLowerCase() === 'authorization')) {
                         const jwtRe = /^eyJ[\\w-]+\\.[\\w-]+\\.[\\w-]+$/;
@@ -344,11 +345,18 @@ class BrowserSession:
                             }
                         }
                     }
-                    const r = await fetch(u, {credentials: 'include', headers: h});
+                    const opts = {credentials: 'include', headers: h, method: m};
+                    if (b !== null && b !== undefined) {
+                        opts.body = JSON.stringify(b);
+                        if (!Object.keys(h).some(k => k.toLowerCase() === 'content-type')) {
+                            h['Content-Type'] = 'application/json';
+                        }
+                    }
+                    const r = await fetch(u, opts);
                     const t = await r.text();
                     try { return JSON.parse(t); } catch (e) { return {__raw: t}; }
                 }""",
-                [url, headers or {}],
+                [url, headers or {}, method, body],
             )
 
     def _assert_not_blocked(self, pg) -> None:

@@ -470,8 +470,9 @@ class _FakeAgentSession:
     def __exit__(self, *exc):
         self.close()
 
-    def fetch_json(self, url, *, referer=None, headers=None):
-        self.calls.append({"url": url, "referer": referer, "headers": headers or {}})
+    def fetch_json(self, url, *, referer=None, headers=None, method="GET", body=None):
+        self.calls.append({"url": url, "referer": referer, "headers": headers or {},
+                            "method": method, "body": body})
         return self.payload
 
 
@@ -503,20 +504,25 @@ def test_via_agent_login_routes_through_a_browser_session():
         check_true("mapped using the signed-in-only response",
                   offer is not None and offer.title == "Signed-in Only Gadget")
 
-        # POST is refused outright rather than silently going through the plain
-        # Fetcher (which would defeat the point) or being sent anonymously.
+        # POST also goes through the agent session (confirmed live: USFans'
+        # own keyword-search endpoint is a POST with a JSON body) rather than
+        # being refused or silently sent anonymously through the plain Fetcher.
+        post_fake = _FakeAgentSession({"item": {"itemId": "77", "itemName": "Posted Gadget"}})
+        agents_module.agent_browser_session = lambda agent_key: post_fake
         post_client = ProviderClient("agent_lookup", "taobao", FakeFetcher({}),
                                      base_url="https://example.test")
         post_client.preset = {
             **post_client.preset,
             "via_agent_login": "cssbuy",
-            "detail": {**post_client.preset["detail"], "method": "POST"},
+            "detail": {**post_client.preset["detail"], "method": "POST",
+                       "body": {"id": "{id}"}},
         }
-        try:
-            post_client.call("detail", {"id": "1", "url": ""})
-            check("POST through an agent session is refused", False, True)
-        except ProviderError as e:
-            check_true("POST refusal names the reason", "only GET is supported" in str(e))
+        offer = post_client.detail("77", url="https://item.taobao.com/item.htm?id=77")
+        check_true("POST through an agent session is mapped",
+                  offer is not None and offer.title == "Posted Gadget")
+        check("exactly one POST call went through the agent session", len(post_fake.calls), 1)
+        check("POST call used the POST method", post_fake.calls[0]["method"], "POST")
+        check("POST body was expanded and sent", post_fake.calls[0]["body"], {"id": "77"})
     finally:
         agents_module.agent_browser_session = original
 

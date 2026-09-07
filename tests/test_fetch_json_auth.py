@@ -52,6 +52,21 @@ class _Handler(BaseHTTPRequestHandler):
     storage = "localStorage"
     wrap = "bare"  # bare | json_string | nested_object
 
+    def do_POST(self):
+        if self.path.startswith("/api/echo"):
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b""
+            _Handler.received["auth_header"] = self.headers.get("Authorization")
+            _Handler.received["content_type"] = self.headers.get("Content-Type")
+            _Handler.received["body"] = json.loads(raw) if raw else None
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}).encode())
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_GET(self):
         if self.path.startswith("/api/check"):
             _Handler.received["auth_header"] = self.headers.get("Authorization")
@@ -136,6 +151,29 @@ def main() -> None:
             )
             check("caller-supplied header wins over an auto-detected one",
                   _Handler.received.get("auth_header"), "Bearer explicit-value")
+        finally:
+            sess.close()
+
+        print("\nPOST with a JSON body (USFans' own search endpoint is a POST)")
+        _Handler.storage, _Handler.wrap = "localStorage", "bare"
+        _Handler.received.clear()
+        sess = BrowserSession(profile_dir=str(tmp_profile / "post_body"))
+        sess.start()
+        try:
+            payload = {"keyWord": "bluetooth earbuds", "channel": "2", "pageNum": 1}
+            result = sess.fetch_json(
+                f"http://127.0.0.1:{port}/api/echo",
+                referer=f"http://127.0.0.1:{port}/",
+                method="POST",
+                body=payload,
+            )
+            check("POST request succeeded", result, {"ok": True})
+            check("body sent as JSON, round-trips exactly",
+                  _Handler.received.get("body"), payload)
+            check("Content-Type defaulted to application/json",
+                  _Handler.received.get("content_type"), "application/json")
+            check("JWT still auto-attached on a POST",
+                  _Handler.received.get("auth_header"), f"Bearer {REAL_LOOKING_JWT}")
         finally:
             sess.close()
     finally:
