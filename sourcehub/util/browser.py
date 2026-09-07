@@ -81,10 +81,17 @@ class BrowserSession:
     """Thin wrapper over a persistent Playwright context."""
 
     def __init__(self, *, headless: Optional[bool] = None, profile_dir: Optional[str] = None,
-                 slow_mo: int = 0):
+                 slow_mo: int = 0, block_media: bool = True):
         s = get_settings()
         self.headless = s.sourcehub_headless if headless is None else headless
         self.profile_dir = profile_dir or str(s.browser_profile_path)
+        # Scraping doesn't need images/fonts/media -- product images are fetched
+        # separately over plain HTTP, and it roughly halves page time. A *human*
+        # logging in needs the real page: some sites gate their own JS
+        # interactivity on webfonts finishing load, so aborting that request
+        # (rather than a clean 404) can leave a page looking half-rendered with
+        # click handlers that never attach -- interactive_login() turns this off.
+        self.block_media = block_media
         self.proxy = s.sourcehub_proxy or None
         self.user_agent = s.sourcehub_user_agent
         self.slow_mo = slow_mo
@@ -137,14 +144,15 @@ class BrowserSession:
                 ) from e
             raise
         self._ctx.add_init_script(STEALTH_JS)
-        # Images/fonts/media are dead weight for scraping; we fetch product images
-        # separately over plain HTTP. Cuts page time roughly in half.
-        self._ctx.route(
-            "**/*",
-            lambda route: route.abort()
-            if route.request.resource_type in ("image", "media", "font")
-            else route.continue_(),
-        )
+        if self.block_media:
+            # Images/fonts/media are dead weight for scraping; we fetch product
+            # images separately over plain HTTP. Cuts page time roughly in half.
+            self._ctx.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in ("image", "media", "font")
+                else route.continue_(),
+            )
         return self
 
     def close(self) -> None:
@@ -318,7 +326,7 @@ class BrowserSession:
 
 def interactive_login(start_url: str, profile_dir: str | None = None) -> None:
     """Open a visible browser so a human can log in once. Cookies persist to disk."""
-    sess = BrowserSession(headless=False, profile_dir=profile_dir, slow_mo=50)
+    sess = BrowserSession(headless=False, profile_dir=profile_dir, slow_mo=50, block_media=False)
     sess.start()
     try:
         with sess.page() as pg:
