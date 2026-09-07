@@ -182,6 +182,18 @@ SITES = [
         "live, no login needed) -- see scrapers/greetbuy.py. Items carry a real, "
         "clean detail.1688.com URL, same as 1688 itself.",
     ),
+    dict(
+        key="liuhuamall",
+        name="LIUHUAMALL",
+        base_url="https://www.liuhuamall.com",
+        home_currency="USD",
+        default_language="en",
+        is_wholesale=True,
+        notes="Guangzhou Liuhua clothing wholesale market's own B2B platform -- not a "
+        "forwarding agent, its own independent catalog and (per its own site) its own "
+        "international shipping, same shape as Alibaba/DHgate. Fully anonymous search "
+        "confirmed live -- see scrapers/liuhuamall.py.",
+    ),
 ]
 
 
