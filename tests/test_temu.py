@@ -26,6 +26,7 @@ os.environ["SOURCEHUB_DB_URL"] = f"sqlite:///{(_TMP / 't.db').as_posix()}"
 os.environ["SOURCEHUB_MEDIA_DIR"] = str(_TMP / "media")
 os.environ["TRANSLATE_PROVIDER"] = "none"
 
+from sourcehub.scrapers.base import RawOffer  # noqa: E402
 from sourcehub.scrapers.temu import TemuAdapter, _extract_raw_data  # noqa: E402
 
 FAILS: list[str] = []
@@ -146,6 +147,91 @@ def main() -> int:
     adapter2 = TemuAdapter.__new__(TemuAdapter)
     adapter2.fetch_html = lambda url, phase="search": empty_html
     check("empty item yields nothing", list(adapter2.search("usb hub")), [])
+
+    print("\nfetch_detail() maps every field, from a second real captured page "
+          "(a storage cabinet with 10 real colour variants)")
+    detail_store = {
+        "goods": {
+            "goodsId": 601099572358007,
+            "goodsName": "Storage Cabinet with 5 Drawers: Fabric Closet "
+                         "Organizer, Metal Frame And Wood Tabletop",
+            "minOnSalePrice": 2570, "maxOnSalePrice": 3610,
+            "gallery": [
+                {"url": "https://img.kwcdn.com/product/fancy/img1.jpg"},
+                {"url": "https://img.kwcdn.com/product/fancy/img2.jpg"},
+            ],
+            "goodsProperty": [
+                {"key": "Material", "values": ["Metal"]},
+                {"key": "Style", "values": ["Contemporary"]},
+            ],
+        },
+        "mall": {"mallData": {"mallName": "Modern Elegance", "mallStar": 4.6}},
+        "reviewStore": {"showScore": 4.5, "reviewNum": 12397},
+        "productDetail": {"floorList": [
+            {"items": [{"text": "Dear customer, the height is 21 inches."}]},
+            {"items": [{"url": "https://img.kwcdn.com/product/fancy/detail1.jpg"}]},
+        ]},
+        "sku": [
+            {"skuId": 17595036941674, "salePrice": 2565, "stockQuantity": 1000,
+             "specs": [{"specKey": "Color", "specValue": "Black - 5 Drawers"}],
+             "thumbUrl": "https://img.kwcdn.com/product/fancy/black.jpg"},
+            {"skuId": 88418679805188, "salePrice": 3595, "stockQuantity": 0,
+             "specs": [{"specKey": "Color", "specValue": "Light Gray - 5 Drawer"}],
+             "thumbUrl": "https://img.kwcdn.com/product/fancy/lightgray.jpg"},
+        ],
+    }
+    detail_html = "<html><head></head><body><script>window.rawData=" + \
+        json.dumps({"store": detail_store}) + ";</script></body></html>"
+
+    adapter3 = TemuAdapter.__new__(TemuAdapter)
+    adapter3.fetch_html = lambda url, phase="detail": detail_html
+    shallow = RawOffer(
+        site_key="temu", site_product_id="601099572358007",
+        url="https://www.temu.com/storage-cabinet.html",
+        title="placeholder from search", currency="USD", price_min=25.70,
+    )
+    enriched = adapter3.fetch_detail(shallow)
+
+    check("detail_fetched flagged", enriched.detail_fetched)
+    check("title replaced with the fuller goodsName", enriched.title,
+          "Storage Cabinet with 5 Drawers: Fabric Closet Organizer, Metal "
+          "Frame And Wood Tabletop")
+    check("price_min converted from cents", enriched.price_min, 25.70)
+    check("price_max converted from cents (search only ever had one price)",
+          enriched.price_max, 36.10)
+    check("gallery images appended", enriched.image_urls,
+          ["https://img.kwcdn.com/product/fancy/img1.jpg",
+           "https://img.kwcdn.com/product/fancy/img2.jpg"])
+    check("seller replaced with the real mall name", enriched.seller_name,
+          "Modern Elegance")
+    check("rating mapped", enriched.rating, 4.5)
+    check("review_count mapped", enriched.review_count, 12397)
+    specs = {s.key: s.value for s in enriched.specs}
+    check("goodsProperty mapped to specs", specs,
+          {"Material": "Metal", "Style": "Contemporary"})
+    check("description built from productDetail's text floors",
+               "21 inches" in (enriched.description or ""))
+
+    check("both real SKU variants mapped", len(enriched.variants), 2)
+    in_stock_variant = next(v for v in enriched.variants if v.sku == "17595036941674")
+    check("in-stock variant price converted from cents", in_stock_variant.price, 25.65)
+    check("in-stock variant attrs from specs", in_stock_variant.attrs,
+          {"Color": "Black - 5 Drawers"})
+    check("in-stock variant flagged in_stock", in_stock_variant.in_stock)
+
+    out_of_stock_variant = next(v for v in enriched.variants if v.sku == "88418679805188")
+    check("zero-stock variant flagged out of stock",
+               not out_of_stock_variant.in_stock)
+
+    print("\nfetch_detail() on a page with no window.rawData is a clean "
+          "no-op, not a crash (e.g. the saved session expired mid-crawl)")
+    adapter4 = TemuAdapter.__new__(TemuAdapter)
+    adapter4.fetch_html = lambda url, phase="detail": "<html>sign in wall</html>"
+    unchanged = RawOffer(site_key="temu", site_product_id="x", url="https://x",
+                         title="original title", currency="USD")
+    result = adapter4.fetch_detail(unchanged)
+    check("title untouched", result.title, "original title")
+    check("not marked detail_fetched", not result.detail_fetched)
 
     print("\n" + "=" * 62)
     if FAILS:

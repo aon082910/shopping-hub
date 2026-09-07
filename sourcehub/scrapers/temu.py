@@ -19,9 +19,18 @@ has no reason to hide its own item ids), ``title``, ``priceInfo.price`` (an
 integer in *cents*), ``priceInfo.currency``, ``image.url``, ``seoLinkUrl``
 (a real relative product-page URL), ``salesNum``, ``comment.goodsScore``.
 
-NOT yet implemented: pagination past the first ~40 results, and
-fetch_detail() (the product page's own embedded state hasn't been captured
-yet). Both are natural follow-ups once this is confirmed working end to end.
+The product-detail page uses the SAME ``window.rawData`` mechanism, confirmed
+live via a second captured HAR (this one for a product page specifically) --
+but its real fields sit under a much deeper, differently-shaped
+``store.goods``/``store.sku``/``store.mall``/``store.reviewStore``/
+``store.productDetail`` tree, not ``store.goodsList`` (that shape is
+search-only). One wrinkle: this HAR exported its response bodies base64
+inline, so parsing it required decoding the HAR entry's own text field before
+looking for ``window.rawData=`` -- the search HAR from the earlier capture
+happened not to be base64-encoded, so this is a property of the exporting
+tool/session, not of the page itself.
+
+NOT yet implemented: pagination past the first ~40 search results per keyword.
 """
 
 from __future__ import annotations
@@ -171,4 +180,98 @@ class TemuAdapter(SiteAdapter):
         image_url = (d.get("image") or {}).get("url")
         if image_url:
             offer.image_urls.append(image_url)
+        return offer
+
+    def fetch_detail(self, offer: RawOffer) -> RawOffer:
+        try:
+            html = self.fetch_html(offer.url, phase="detail")
+        except Exception as e:
+            log.warning("[temu] detail fetch failed for %s: %s", offer.url, e)
+            return offer
+
+        raw = _extract_raw_data(html)
+        if raw is None:
+            log.warning("[temu] no window.rawData on the detail page for %s", offer.url)
+            return offer
+
+        store = raw.get("store") or {}
+        g = store.get("goods") or {}
+        if not g:
+            return offer
+
+        title = clean(str(g.get("goodsName") or ""))
+        if title:
+            offer.title = title
+
+        min_price = g.get("minOnSalePrice")
+        max_price = g.get("maxOnSalePrice")
+        if isinstance(min_price, (int, float)):
+            offer.price_min = min_price / 100
+        if isinstance(max_price, (int, float)):
+            offer.price_max = max_price / 100
+
+        for img in g.get("gallery") or []:
+            url = img.get("url") if isinstance(img, dict) else None
+            if url and url not in offer.image_urls:
+                offer.image_urls.append(url)
+
+        mall_name = clean(str(((store.get("mall") or {}).get("mallData") or {}).get("mallName") or ""))
+        if mall_name:
+            offer.seller_name = mall_name
+
+        review = store.get("reviewStore") or {}
+        if review.get("showScore") is not None:
+            offer.rating = review.get("showScore")
+        if review.get("reviewNum") is not None:
+            offer.review_count = review.get("reviewNum")
+
+        for prop in g.get("goodsProperty") or []:
+            if not isinstance(prop, dict):
+                continue
+            key = clean(str(prop.get("key") or ""))
+            value = clean(", ".join(str(v) for v in (prop.get("values") or []) if v))
+            if key and value:
+                offer.add_spec(key, value)
+
+        # Rich description: floorList mixes text blocks (type 3) and image
+        # blocks (type 1) in display order; join the text ones into a plain
+        # description rather than trying to preserve the original layout.
+        floor_list = (store.get("productDetail") or {}).get("floorList") or []
+        desc_parts = [
+            clean(str(item["text"]))
+            for floor in floor_list
+            for item in (floor.get("items") or [])
+            if item.get("text")
+        ]
+        if desc_parts:
+            offer.description = "\n".join(desc_parts)[:5000]
+
+        for sku in store.get("sku") or []:
+            if not isinstance(sku, dict):
+                continue
+            sku_id = sku.get("skuId")
+            if not sku_id:
+                continue
+            attrs = {}
+            for spec in sku.get("specs") or []:
+                k = clean(str(spec.get("specKey") or ""))
+                v = clean(str(spec.get("specValue") or ""))
+                if k and v:
+                    attrs[k] = v
+            price_cents = sku.get("salePrice")
+            price = (price_cents / 100) if isinstance(price_cents, (int, float)) else None
+            stock = sku.get("stockQuantity")
+            stock = int(stock) if isinstance(stock, (int, float)) else None
+            offer.add_variant(
+                sku=str(sku_id),
+                name=", ".join(f"{k}: {v}" for k, v in attrs.items()) or str(sku_id),
+                price=price,
+                currency=offer.currency,
+                attrs=attrs,
+                stock=stock,
+                in_stock=(stock > 0) if stock is not None else True,
+                image_url=sku.get("thumbUrl") or None,
+            )
+
+        offer.detail_fetched = True
         return offer
