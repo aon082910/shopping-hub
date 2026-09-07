@@ -595,6 +595,118 @@ def test_usfans_resolve_then_detail():
     check("no resolved id -> no offer, not an exception", result, None)
 
 
+def test_usfans_search_is_a_post_with_a_json_body():
+    """usfans' keyword search, captured live from a real logged-in session
+    (POST /api/goods/search/keyword, not the GET query-param shape every
+    other search-capable preset uses). Confirmed live: USFans never exposes
+    the real Taobao item id anywhere in its own API -- even here, with no
+    external URL involved at all -- so `url` must come from item_url_template
+    (USFans' own product page), never from a `url`/`detailUrl` field the
+    response doesn't even have.
+    """
+    print("\nusfans: keyword search is a POST with a JSON body, via the agent session")
+    import sourcehub.agents as agents_module
+
+    # Trimmed from a real response to the two records that matter for this
+    # test; the rest are identically shaped.
+    search_session = _FakeAgentSession(
+        {"code": 200, "msg": "操作成功", "success": True, "data": {
+            "records": [
+                {
+                    "goodsId": "9Z_NVTvkbn66Zw48e9p0iC4_mMRlUWnjEkUjId0dZluR8ozIH6fTjSpT",
+                    "title": "Suitable for Reading Device C30 Bluetooth Headset",
+                    "image": "https://img.alicdn.com/imgextra/i4/2212704965261/O1CN01TP4f51.jpg",
+                    "price": 78.00, "priceCurrency": 12.96, "monthSold": 0,
+                    "channel": 2, "shopId": None, "inventory": 200,
+                    "discountPrice": None, "discountPriceCurrency": None,
+                    "goodsLabelType": 1,
+                },
+                {
+                    "goodsId": "W4N3GSmOSzv8kz7NJdIucHT_sfFlhOBN1uQdBxMmElKqczRCyZxL3ugC",
+                    "title": "Suitable for Oppoa1Pro Headphones Bluetooth",
+                    "image": "https://img.alicdn.com/imgextra/i4/2212704965261/O1CN01TP4f52.jpg",
+                    "price": 78.00, "priceCurrency": 12.96, "monthSold": 0,
+                    "channel": 2, "shopId": None, "inventory": 200,
+                    "discountPrice": None, "discountPriceCurrency": None,
+                    "goodsLabelType": 1,
+                },
+            ],
+            "total": "1000", "size": "20", "current": "1", "pages": "50",
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: search_session
+    try:
+        client = ProviderClient("usfans", "taobao", FakeFetcher({}),
+                                base_url="https://www.usfans.com")
+        check_true("usfans reports search capability now that it's mapped", client.can_search)
+        offers = list(client.search("bluetooth earbuds", page=1))
+
+        check("exactly one call went through the agent session", len(search_session.calls), 1)
+        check("search used POST", search_session.calls[0]["method"], "POST")
+        check("body carries the taobao provider_code (channel=2)",
+              search_session.calls[0]["body"]["channel"], "2")
+        check("body carries the keyword", search_session.calls[0]["body"]["keyWord"],
+              "bluetooth earbuds")
+        check("body carries the page number", search_session.calls[0]["body"]["pageNum"], "1")
+
+        check("both records mapped", len(offers), 2)
+        check("title mapped straight from `title` (already English, no titleEn here)",
+              offers[0].title, "Suitable for Reading Device C30 Bluetooth Headset")
+        check("price mapped from the raw CNY `price`, not the converted one",
+              offers[0].price_min, 78.00)
+        check("image mapped from the singular `image` field", offers[0].image_urls,
+              ["https://img.alicdn.com/imgextra/i4/2212704965261/O1CN01TP4f51.jpg"])
+        check("url falls back to USFans' own product page, not a broken "
+              "reconstruction from the opaque goodsId as a Taobao id",
+              offers[0].url,
+              "https://usfans.com/product/2/9Z_NVTvkbn66Zw48e9p0iC4_mMRlUWnjEkUjId0dZluR8ozIH6fTjSpT")
+    finally:
+        agents_module.agent_browser_session = original
+
+
+def test_usfans_search_origin_detail_skips_resolve():
+    """Enrichment of a search-discovered item must NOT run `resolve` -- the
+    item's goodsId is already USFans' own native id (confirmed live: it works
+    directly against `detail`), and resolve exists to convert an *external*
+    source-site id into that native one, which is meaningless to do twice.
+    """
+    print("\nusfans: skip_resolve bypasses resolve for a search-origin id")
+    import sourcehub.agents as agents_module
+
+    detail_session = _FakeAgentSession(
+        {"code": 200, "success": True, "data": {
+            "goodsId": "9Z_NVTvkbn66Zw48e9p0iC4_mMRlUWnjEkUjId0dZluR8ozIH6fTjSpT",
+            "titleEn": "Reading Device Bluetooth Headset",
+            "detailUrl": "https://item.taobao.com/item.htm?id=someOpaqueToken",
+            "price": 78.0,
+        }}
+    )
+    original = agents_module.agent_browser_session
+    agents_module.agent_browser_session = lambda agent_key: detail_session
+    try:
+        resolve_fetcher = FakeFetcher({})  # would raise if resolve were ever attempted
+        client = ProviderClient("usfans", "taobao", resolve_fetcher,
+                                base_url="https://www.usfans.com")
+        native_url = ("https://usfans.com/product/2/"
+                      "9Z_NVTvkbn66Zw48e9p0iC4_mMRlUWnjEkUjId0dZluR8ozIH6fTjSpT")
+        offer = client.detail(
+            "9Z_NVTvkbn66Zw48e9p0iC4_mMRlUWnjEkUjId0dZluR8ozIH6fTjSpT",
+            url=native_url, skip_resolve=True,
+        )
+        check_true("resolve was never called", not resolve_fetcher.last)
+        check("exactly one call went through the agent session", len(detail_session.calls), 1)
+        check_true("the detail call used the native id directly, unresolved",
+                  "goodsId=9Z_NVTvkbn66Zw48e9p0iC4_mMRlUWnjEkUjId0dZluR8ozIH6fTjSpT"
+                  in detail_session.calls[0]["url"])
+        check_true("offer mapped", offer is not None)
+        check("the caller's own (USFans product page) URL wins over the "
+              "opaque-token detailUrl, even with resolve skipped",
+              offer.url, native_url)
+    finally:
+        agents_module.agent_browser_session = original
+
+
 def test_usfans_multi_sku_item_a_real_login_actually_returned():
     """Two bugs found running against a real, successfully authenticated
     USFans response (not a fabrication -- this is what a real multi-SKU
@@ -763,7 +875,9 @@ def main() -> int:
                test_capabilities, test_probe, test_probe_on_a_detail_only_preset,
                test_driver_resolution, test_no_key_preset_still_activates_the_provider,
                test_hybrid_detail_flow, test_via_agent_login_routes_through_a_browser_session,
-               test_usfans_resolve_then_detail, test_usfans_multi_sku_item_a_real_login_actually_returned,
+               test_usfans_resolve_then_detail, test_usfans_search_is_a_post_with_a_json_body,
+               test_usfans_search_origin_detail_skips_resolve,
+               test_usfans_multi_sku_item_a_real_login_actually_returned,
                test_usfans_detailurl_populated_but_wrong_is_not_trusted,
                test_usfans_multi_sku_variants_map_to_readable_attrs):
         fn()

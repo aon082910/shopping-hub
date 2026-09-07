@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,6 +40,11 @@ class AgentLink:
     home_url: str
     consolidation: bool = True
     is_direct: bool = False
+
+
+def _bare_host(url: str) -> str:
+    host = urlparse(url).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
 
 
 def item_id_from_url(url: str, site_key: str) -> Optional[str]:
@@ -171,6 +176,27 @@ def build_agent_links(session: Session, offer: Offer) -> list[AgentLink]:
         .where(ShippingAgent.enabled.is_(True))
         .order_by(ShippingAgent.sort_order)
     ).all()
+
+    # Some agents (USFans confirmed live) never expose the source site's real
+    # item id anywhere in their own API -- deliberately, so a buyer can't cut
+    # them out and go straight to Taobao. When that's the case, offer.url is
+    # already that agent's own product page (see providers.yaml's usfans
+    # item_url_template) rather than a taobao/tmall/1688 URL -- the only
+    # dereferenceable link available at all. Wrapping an already-agent-hosted
+    # URL into ANY agent's "paste a link" tool, including that same agent's
+    # own, would just double-wrap nonsense, and no other agent has a real
+    # source URL to act on either. Link to it directly instead.
+    offer_host = _bare_host(offer.url)
+    if offer_host:
+        for agent in agents:
+            if agent.key == "direct" or site.key not in (agent.supported_site_keys or []):
+                continue
+            if offer_host == _bare_host(agent.home_url):
+                return [AgentLink(
+                    key=agent.key, name=agent.name, url=offer.url,
+                    fee_note=agent.service_fee_note, home_url=agent.home_url,
+                    consolidation=agent.consolidation,
+                )]
 
     links: list[AgentLink] = []
     for agent in agents:

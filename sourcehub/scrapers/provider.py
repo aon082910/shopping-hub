@@ -307,8 +307,14 @@ class ProviderClient:
             if offer:
                 yield offer
 
-    def detail(self, item_id: str, url: str = "") -> Optional[RawOffer]:
-        resolve_spec = self.preset.get("resolve")
+    def detail(self, item_id: str, url: str = "", *, skip_resolve: bool = False) -> Optional[RawOffer]:
+        """``skip_resolve``: the caller already has this preset's own native id
+        (confirmed live: a USFans search result's ``goodsId`` works directly
+        against ``detail``, no ``resolve`` needed) -- resolve exists to turn an
+        *external* source-site URL into that native id, which is meaningless to
+        do to an id that's already native.
+        """
+        resolve_spec = self.preset.get("resolve") if not skip_resolve else None
         if resolve_spec:
             # Some agents (USFans confirmed live) don't accept the source
             # site's own item id at their detail endpoint at all -- only an
@@ -332,15 +338,17 @@ class ProviderClient:
         if not node:
             return None
         # `url` here is still the real URL this was called with -- resolve only
-        # ever reassigns `item_id`, never `url`. When a resolve step exists,
-        # trust it over the API's own returned url field outright: confirmed
-        # live that the API's field is not merely sometimes empty but can be
-        # populated with a URL built from *its own* opaque, per-request id
-        # substituted in place of the source site's real one -- syntactically
-        # a valid-looking URL, semantically pointing nowhere. There is no
-        # resolve-free case where the caller's URL could be less correct.
+        # ever reassigns `item_id`, never `url`. Whenever this *preset* uses a
+        # resolve step at all (regardless of whether it ran on this particular
+        # call -- a skip_resolve call has just as untrustworthy a detailUrl),
+        # trust the caller's URL over the API's own returned url field
+        # outright: confirmed live that the API's field is not merely
+        # sometimes empty but can be populated with a URL built from an
+        # opaque, non-numeric token in place of the source site's real id --
+        # syntactically a valid-looking URL, semantically pointing nowhere.
         offer = self.to_offer(
-            node, detail=True, fallback_url=url, prefer_fallback_url=bool(resolve_spec),
+            node, detail=True, fallback_url=url,
+            prefer_fallback_url=bool(self.preset.get("resolve")),
         )
         if offer:
             offer.detail_fetched = True

@@ -325,7 +325,14 @@ class _AlibabaCNBase(SiteAdapter):
         if client is None or not client.can_detail:
             return offer
         try:
-            enriched = client.detail(offer.site_product_id, offer.url)
+            # When search *also* went through this same provider, its
+            # site_product_id is already that provider's own native id (not a
+            # source-site id a resolve step would need to convert) -- see
+            # ProviderClient.detail()'s skip_resolve.
+            enriched = client.detail(
+                offer.site_product_id, offer.url,
+                skip_resolve=(self.search_driver == "provider"),
+            )
         except Exception as e:
             log.warning("[%s] provider detail failed for %s: %s",
                         self.key, offer.site_product_id, e)

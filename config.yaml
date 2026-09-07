@@ -73,7 +73,12 @@ sites:
 
   taobao:
     enabled: true
-    driver: hybrid
+    # `provider`, not `hybrid`: browser search on taobao.com itself is blocked
+    # by Taobao's own anti-bot wall for anonymous/non-China traffic regardless
+    # of any forwarding-agent login, and unavailable at all without a Taobao
+    # account. USFans' own keyword search (confirmed live) covers discovery
+    # instead, so both halves go through the provider here.
+    driver: provider
     provider_preset: usfans
     delay_seconds: 6.0
     concurrency: 1
@@ -81,7 +86,7 @@ sites:
 
   tmall:
     enabled: true
-    driver: hybrid
+    driver: provider
     provider_preset: usfans
     delay_seconds: 6.0
     concurrency: 1

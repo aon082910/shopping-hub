@@ -233,23 +233,33 @@ providers:
           value: ["value"]
 
   # ---------------------------------------------------------------------------
-  # USFans -- verified live (2026-09-07), not just written from docs: its taobao
-  # and tmall lookups genuinely 401 logged out ("Please log in to continue"),
-  # confirming this is a real case for via_agent_login, not a hypothetical one.
-  # 1688 lookups do NOT require login (confirmed 200 anonymously); harmless to
-  # route through the agent session anyway since it degrades to the same access.
+  # USFans -- verified live end-to-end (2026-09-07) against a real logged-in
+  # account: resolve, detail (including a real 40-variant multi-SKU listing),
+  # and keyword search all confirmed against genuine responses.
   #
-  # Two-step because USFans' detail endpoint won't accept a source site's own
-  # item id directly for taobao/tmall -- only an opaque token issued, per URL,
-  # by its own "paste a link" resolver. `resolve` runs first (always anonymous,
-  # confirmed live) and its output feeds the real detail call. 1688's own
-  # numeric id passes through the resolver unchanged.
+  # IMPORTANT, confirmed with two independent live captures -- one via `resolve`
+  # on an externally-supplied real Taobao URL, one via a native search result
+  # with no external URL involved at all: USFans NEVER exposes the source
+  # site's real item id anywhere in its own API. `detailUrl` always comes back
+  # built from an opaque, non-numeric token, not the plain numeric Taobao id
+  # (e.g. `id=CgrjeQOx4IkZAW-qY7fZZW_dHOGze7yyBfK9zig`, not `id=1075605616467`).
+  # This looks deliberate -- it stops a buyer from cutting the agent out and
+  # going straight to Taobao. Practical effect: there is no way to recover a
+  # genuine, cross-agent-compatible source URL for anything discovered through
+  # USFans' own search. `item_url_template` below points at USFans' *own*
+  # product page instead (the one link that is actually real and clickable),
+  # not the source site -- see build_agent_links() in agents.py, which detects
+  # this and shows a single "continue on USFans" link rather than wrapping a
+  # usfans.com URL into every forwarding agent's "paste a link" tool.
   #
-  # UNVERIFIED: every test above used a fabricated item id (this project has no
-  # USFans account), so every detail response came back with real field names
-  # but null/zero values -- the shape is confirmed, a fully-populated response
-  # is not. Expect one round of `provider-probe` against a real item once
-  # you've done `agent-login --agent usfans`.
+  # Two-step for *detail-by-URL* lookups (e.g. a real Taobao URL a browser
+  # crawl discovered): USFans' detail endpoint won't accept a source site's own
+  # item id directly -- only an opaque token issued, per URL, by its own
+  # "paste a link" resolver. `resolve` runs first (always anonymous, confirmed
+  # live) and its output feeds the real detail call. Search results already
+  # carry USFans' own native id and skip this step entirely (confirmed live:
+  # a search result's `goodsId` works directly against `detail`) -- see
+  # ProviderClient.detail()'s `skip_resolve`.
   # ---------------------------------------------------------------------------
   usfans:
     base_url: "https://www.usfans.com"
@@ -261,15 +271,15 @@ providers:
       taobao:
         provider_code: "2"
         currency: CNY
-        item_url_template: "https://item.taobao.com/item.htm?id={id}"
+        item_url_template: "https://usfans.com/product/2/{id}"
       tmall:
         provider_code: "2"
         currency: CNY
-        item_url_template: "https://detail.tmall.com/item.htm?id={id}"
+        item_url_template: "https://usfans.com/product/2/{id}"
       "1688":
         provider_code: "1"
         currency: CNY
-        item_url_template: "https://detail.1688.com/offer/{id}.html"
+        item_url_template: "https://usfans.com/product/1/{id}"
 
     resolve:
       path: "/api/goods/short-link/parser"
@@ -289,29 +299,51 @@ providers:
         queryDelivery: "true"
         activityId: ""
 
+    # Confirmed live: a real keyword search on usfans.com's own search page,
+    # not documented anywhere -- this is what lets USFans double as discovery
+    # for taobao/tmall, which otherwise need a Taobao account this project's
+    # user cannot get (anonymous browser search is blocked by Taobao's own
+    # anti-bot wall regardless of forwarding-agent login).
+    search:
+      path: "/api/goods/search/keyword"
+      method: POST
+      body:
+        channel: "{provider}"
+        keyWord: "{keyword}"
+        pageNum: "{page}"
+        pageSize: 20
+        sort: '{"sales":"asc"}'
+      headers:
+        currency: USD
+        language: en_US
+        timezone: America/New_York
+
     map:
       detail_path: ["data"]
+      items_path: "data.records"
       item:
         id: ["goodsId"]
         title: ["titleEn", "title"]
-        # `detailUrl` is confirmed null on at least some real items -- the
-        # generic id-into-url_template fallback in to_offer() would otherwise
-        # reconstruct a broken URL from this preset's own opaque `goodsId`, so
-        # it now prefers the real URL the lookup was actually called with
-        # instead. See provider.py's to_offer()/detail() for that.
+        # `detailUrl` is never trustworthy for this preset (see the block
+        # comment above) -- it's always either null or built from an opaque
+        # token, never the source site's real id. url resolution instead
+        # falls through to `item_url_template` (this preset's own product
+        # page), via to_offer()'s fallback_url/prefer_fallback_url machinery.
+        # See provider.py's to_offer()/detail() for that.
         url: ["detailUrl"]
         # `price` (raw CNY) preferred over `convertedPrice`: this project keeps
         # every offer in its native currency and converts once, centrally, in
         # the ingest pipeline -- taking an already-converted number here would
         # both bypass that and disagree with it if USFans' own rate differs.
-        # NOTE (confirmed live): a multi-SKU listing reports 0 for both fields
-        # at this top level -- the real price is per-SKU, in `skuList`, whose
-        # shape has not been captured yet. Until that's mapped, such listings
-        # come through with no price rather than a wrong one (to_offer()
-        # treats a mapped 0 the same as "not disclosed").
+        # A multi-SKU listing reports 0 for both fields at this top level --
+        # the real price is per-SKU, in `skuList` (see `variants` below);
+        # to_offer() treats a mapped 0 the same as "not disclosed" and derives
+        # price_min/price_max from the variants instead.
         price: ["price", "convertedPrice"]
         currency: ["currency"]
-        image: ["images[0]"]
+        # Search results only ever carry a single `image`, not the `images`
+        # array detail responses have.
+        image: ["images[0]", "image"]
         images: ["images[]"]
         seller: ["shopNameEn", "shopName"]
         description: ["description"]
