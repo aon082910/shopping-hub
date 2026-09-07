@@ -214,6 +214,14 @@ sites:
     delay_seconds: 3.0
     concurrency: 1
 
+  greetbuy:
+    # Confirmed live 2026-09-07: fully anonymous, no login, no session --
+    # see scrapers/greetbuy.py. 1688-only for now (no confirmed way to
+    # switch its own "Taobao" search tab to a different channel).
+    enabled: true
+    delay_seconds: 3.0
+    concurrency: 2
+
 matching:
   # Two offers merge into one canonical product when the weighted score clears this.
   auto_merge_threshold: 0.86

@@ -170,6 +170,18 @@ SITES = [
         default_language="en",
         notes="Retail, ships to US. Frequent coupon pricing.",
     ),
+    dict(
+        key="greetbuy",
+        name="Greetbuy (1688)",
+        base_url="https://www.greetbuy.com",
+        home_currency="CNY",
+        default_language="zh",
+        is_wholesale=True,
+        needs_agent=True,
+        notes="1688 forwarding agent with a fully anonymous keyword search (confirmed "
+        "live, no login needed) -- see scrapers/greetbuy.py. Items carry a real, "
+        "clean detail.1688.com URL, same as 1688 itself.",
+    ),
 ]
 
 
