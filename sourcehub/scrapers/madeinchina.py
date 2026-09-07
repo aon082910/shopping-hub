@@ -29,29 +29,76 @@ class MadeInChinaAdapter(SiteAdapter):
 
     SEARCH = "https://www.made-in-china.com/productdirectory.do?word={kw}&file=&subaction=hunt&style=b&mode=and&code=0&comProvince=nolimit&order=0&isOpenCorrection=1&page={page}"
 
+    CARD_SELECTORS = [
+        ".prod-list .prod-item", ".list-node", ".search-list li",
+        "div[class*='product-item']",
+    ]
+
     def search(self, keyword: str, max_pages: int | None = None) -> Iterator[RawOffer]:
         for page in range(1, (max_pages or self.max_pages) + 1):
             url = self.SEARCH.format(kw=quote_plus(keyword), page=page)
-            try:
-                body = self.fetcher.get(url, referer=self.base_url + "/").text
-            except Exception as e:
-                log.warning("[madeinchina] page %s failed: %s", page, e)
+            offers = self._cards_at(url, page, context=repr(keyword))
+            if offers is None:
                 return
+            yield from offers
 
-            tree = HTMLParser(body)
-            cards = self.select_cards(tree, [
-                ".prod-list .prod-item", ".list-node", ".search-list li",
-                "div[class*='product-item']",
-            ])
-            if not cards:
+    # Confirmed live 2026-09-08: the homepage embeds ~700 category catalog
+    # links (e.g. /Computer-Products-Catalog/Wireless-Speaker.html), each a
+    # real listing page using the same .search-list/.list-node cards as
+    # search() -- and each pages with a plain ?page=N query param, confirmed
+    # to return distinct products on page 2 (no need for the item<id> URL
+    # form its own in-page pagination links use).
+    CATEGORY_LINK_RE = re.compile(
+        r'href="//www\.made-in-china\.com/([A-Za-z0-9-]+-Catalog/[A-Za-z0-9_-]+)\.html"'
+    )
+
+    def category_seeds(self) -> list[tuple[str, str]]:
+        try:
+            html = self.fetcher.get(self.base_url + "/").text
+        except Exception as e:
+            log.warning("[madeinchina] category discovery failed: %s", e)
+            return []
+        seen: dict[str, str] = {}
+        for path in self.CATEGORY_LINK_RE.findall(html):
+            if path in seen:
+                continue
+            label = clean(path.split("/", 1)[-1].replace("-", " "))
+            seen[path] = label
+        if not seen:
+            log.warning("[madeinchina] no *-Catalog links found on the homepage -- "
+                        "its nav markup has likely changed.")
+        return [(label, f"{self.base_url}/{path}.html") for path, label in seen.items()]
+
+    def crawl_category(self, seed_url: str, max_pages: int | None = None) -> Iterator[RawOffer]:
+        for page in range(1, (max_pages or 200) + 1):
+            url = seed_url if page == 1 else f"{seed_url}?page={page}"
+            offers = self._cards_at(url, page, context=seed_url)
+            if offers is None:
                 return
-            for card in cards:
-                try:
-                    offer = self._parse_card(card)
-                    if offer:
-                        yield offer
-                except Exception as e:
-                    log.debug("[madeinchina] bad card: %s", e)
+            yield from offers
+
+    def _cards_at(self, url: str, page: int, *, context: str) -> Optional[list[RawOffer]]:
+        try:
+            body = self.fetcher.get(url, referer=self.base_url + "/").text
+        except Exception as e:
+            log.warning("[madeinchina] page %s failed for %s: %s", page, context, e)
+            return None
+
+        tree = HTMLParser(body)
+        cards = self.select_cards(tree, self.CARD_SELECTORS)
+        if not cards:
+            log.info("[madeinchina] no cards on page %s for %s", page, context)
+            return None
+
+        offers = []
+        for card in cards:
+            try:
+                offer = self._parse_card(card)
+                if offer:
+                    offers.append(offer)
+            except Exception as e:
+                log.debug("[madeinchina] bad card: %s", e)
+        return offers
 
     def _parse_card(self, card) -> Optional[RawOffer]:
         link = card.css_first("h2 a, .product-name a, a[href*='/product/']")
