@@ -77,7 +77,7 @@ def require_admin(
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "Invalid admin token.",
-            headers={"WWW-Authenticate": 'Basic realm="SourceHub admin"'},
+            headers={"WWW-Authenticate": 'Basic realm="Shopping Hub admin"'},
         )
 
 

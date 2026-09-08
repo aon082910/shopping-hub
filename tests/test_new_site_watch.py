@@ -1,7 +1,7 @@
 """The on_new_site watch: alert when a site that wasn't selling this product starts to.
 
 This is the cross-marketplace thesis the whole app is built on, turned into an
-alert: SourceHub's value is comparing the same product across sites, and "a second
+alert: Shopping Hub's value is comparing the same product across sites, and "a second
 seller just showed up" is the single most direct signal that comparison newly
 matters for a listing. Nothing scraped this before -- the feature is new.
 """

@@ -1,4 +1,4 @@
-# SourceHub
+# Shopping Hub
 
 Scrapes marketplaces across China-facing wholesale/retail, component distribution,
 and US retail, matches the same physical product across them, and publishes one

@@ -165,7 +165,7 @@ def cmd_serve(args) -> int:
         for job in sched.get_jobs():
             print(f"  {job.name:<16} next run: {job.next_run_time}")
 
-    print(f"SourceHub on http://{args.host}:{args.port}")
+    print(f"Shopping Hub on http://{args.host}:{args.port}")
     uvicorn.run(
         "sourcehub.api.main:app",
         host=args.host,

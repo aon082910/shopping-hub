@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SourceHub container entrypoint.
+# Shopping Hub container entrypoint.
 #
 # Responsibilities, in order:
 #   1. seed /config on first run so the YAML files are editable from the host

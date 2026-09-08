@@ -1,4 +1,4 @@
-# Running SourceHub on Unraid
+# Running Shopping Hub on Unraid
 
 Everything below was built and verified against a real Docker daemon: the image
 builds, runs as `nobody:users`, launches Chromium unprivileged, crawls live sites,
@@ -81,11 +81,11 @@ setting below is already filled in and described in the form.
 
 | Field | Value |
 |---|---|
-| Name | `SourceHub` |
+| Name | `shopping-hub` |
 | Repository | `allornothing/shopping-hub:latest` |
 | Network Type | `Bridge` |
 | Port | Container `8000` -> Host `8000` |
-| Path | Container `/config` -> Host `/mnt/user/appdata/sourcehub` (Read/Write) |
+| Path | Container `/config` -> Host `/mnt/user/appdata/shopping-hub` (Read/Write) |
 | Extra Parameters | `--shm-size=1g` |
 
 Add these variables:
@@ -164,13 +164,13 @@ Your appdata now looks like this:
 To see the UI populated without waiting for a crawl:
 
 ```bash
-docker exec -u 99:100 SourceHub python -m sourcehub.cli demo-seed
+docker exec -u 99:100 shopping-hub python -m sourcehub.cli demo-seed
 ```
 
 Then a real crawl:
 
 ```bash
-docker exec -u 99:100 SourceHub python -m sourcehub.cli crawl --sites dhgate,banggood --keyword "usb c hub" --pages 2
+docker exec -u 99:100 shopping-hub python -m sourcehub.cli crawl --sites dhgate,banggood --keyword "usb c hub" --pages 2
 ```
 
 That exact command was run inside the container during testing: 81 listings, zero
@@ -184,15 +184,15 @@ Everything works through `docker exec`. Use `-u 99:100` so anything it writes st
 owned correctly:
 
 ```bash
-docker exec -u 99:100 SourceHub python -m sourcehub.cli health
+docker exec -u 99:100 shopping-hub python -m sourcehub.cli health
 ```
 
 ```bash
-docker exec -u 99:100 SourceHub python -m sourcehub.cli selftest --site dhgate
+docker exec -u 99:100 shopping-hub python -m sourcehub.cli selftest --site dhgate
 ```
 
 ```bash
-docker exec -u 99:100 SourceHub python -m sourcehub.cli stats
+docker exec -u 99:100 shopping-hub python -m sourcehub.cli stats
 ```
 
 `health` is the one worth scheduling. It compares each site's recent yield against
@@ -259,7 +259,7 @@ login is genuinely awkward in a container because it wants a visible browser win
 a server anyway. Verify it before enabling the sites:
 
 ```bash
-docker exec SourceHub python -m sourcehub.cli provider-probe --preset otapi --keyword "usb hub"
+docker exec shopping-hub python -m sourcehub.cli provider-probe --preset otapi --keyword "usb hub"
 ```
 
 **Alternative:** do the browser login on a desktop with the project checked out
@@ -302,7 +302,7 @@ Change any of it under `retention:` in `/config/config.yaml`:
 Run it by hand any time:
 
 ```bash
-docker exec SourceHub python -m sourcehub.cli retention
+docker exec shopping-hub python -m sourcehub.cli retention
 ```
 
 ---
@@ -313,13 +313,13 @@ docker exec SourceHub python -m sourcehub.cli retention
 docker pull allornothing/shopping-hub:latest
 ```
 
-Then **Docker -> SourceHub -> Force Update**, or stop and start it.
+Then **Docker -> shopping-hub -> Force Update**, or stop and start it.
 
 Your YAML files in `/config` are never overwritten. A pristine copy of the defaults
 lives at `/defaults` inside the image, so after an upgrade you can see what changed:
 
 ```bash
-docker exec SourceHub diff /defaults/config.yaml /config/config.yaml
+docker exec shopping-hub diff /defaults/config.yaml /config/config.yaml
 ```
 
 Settings added by an upgrade show as missing from your copy. Add them by hand.
@@ -347,12 +347,12 @@ without notice; that is why both commands exist.
 intercepting TLS -- antivirus HTTPS scanning is the usual culprit:
 
 ```bash
-docker exec SourceHub python -m sourcehub.cli trust-setup
+docker exec shopping-hub python -m sourcehub.cli trust-setup
 ```
 
 It probes a live certificate and reports which authority actually signed it.
 
-**Container restarts in a loop.** `docker logs SourceHub`. The entrypoint prints each
+**Container restarts in a loop.** `docker logs shopping-hub`. The entrypoint prints each
 step as it happens, so the failing stage is normally the last line.
 
 **Is it alive?** `http://<tower-ip>:8000/healthz` returns 200 when it is. That is also

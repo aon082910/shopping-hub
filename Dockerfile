@@ -1,4 +1,4 @@
-# SourceHub -- container image for Unraid / any Docker host.
+# Shopping Hub -- container image for Unraid / any Docker host.
 #
 # Built on Microsoft's Playwright image rather than python:slim. Six of the enabled
 # adapters need a real Chromium to run the page's JavaScript -- eBay, Banggood and

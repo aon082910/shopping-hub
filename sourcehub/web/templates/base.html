@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}SourceHub{% endblock %}</title>
+  <title>{% block title %}Shopping Hub{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
 </head>
 <body>
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <a class="brand" href="/"><span class="brand-mark">◈</span> SourceHub</a>
+    <a class="brand" href="/"><span class="brand-mark">◈</span> Shopping Hub</a>
 
     <form class="searchbar" action="/search" method="get" autocomplete="off">
       <input type="search" name="q" value="{{ filters.q if filters else '' }}"
@@ -49,7 +49,7 @@
 
 <footer class="footer wrap">
   <p>
-    SourceHub aggregates public listings from 17 marketplaces. Prices, MOQs and
+    Shopping Hub aggregates public listings from 17 marketplaces. Prices, MOQs and
     shipping figures are captured as published by each site and may be stale or
     incomplete — always confirm on the seller's page before ordering.
   </p>

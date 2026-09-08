@@ -1,4 +1,4 @@
-# SourceHub crawl configuration.
+# Shopping Hub crawl configuration.
 # Edit freely -- reloaded on every crawl run, no restart needed.
 
 crawl:

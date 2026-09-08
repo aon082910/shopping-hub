@@ -84,7 +84,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="SourceHub",
+    title="Shopping Hub",
     description="Cross-marketplace product comparison",
     lifespan=lifespan,
 )
