@@ -77,6 +77,17 @@ def run() -> int:
                            error="BlockedError"))
     # New: too little history to judge.
     seed_runs("chinavasion", [25, 25])
+    # Disabled: tomtop is enabled: false in the real config.yaml (confirmed
+    # unreachable at the TCP level, not a code problem) -- old error history
+    # here must not read as an open "blocked" problem forever, since a
+    # disabled site never gets a new run to clear it.
+    with session_scope() as s:
+        now = dt.datetime.now(dt.timezone.utc)
+        for i in range(4):
+            ts = now - dt.timedelta(hours=20 - i)
+            s.add(CrawlRun(site_key="tomtop", mode="search", started_at=ts,
+                           finished_at=ts, ok=False, offers_seen=0,
+                           error="connection failed"))
 
     with session_scope() as s:
         rows = adapter_health(s)
@@ -89,6 +100,8 @@ def run() -> int:
     # An untouched site must not be reported as broken -- never-worked and
     # stopped-working need different responses.
     check("never crawled is idle", status_of(rows, "taobao"), "idle")
+    check("a disabled site with error history reads as disabled, not blocked",
+          status_of(rows, "tomtop"), "disabled")
 
     print()
     print("details explain themselves")
@@ -106,6 +119,8 @@ def run() -> int:
           attention, {"aliexpress", "alibaba", "banggood"})
     check("idle sites are not flagged", "taobao" in attention, False)
     check("healthy sites are not flagged", "dhgate" in attention, False)
+    check("disabled sites are not flagged even with error history",
+          "tomtop" in attention, False)
     check("counts add up",
           sum(summary["counts"].values()), len(summary["sites"]))
 

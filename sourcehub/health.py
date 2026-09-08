@@ -13,10 +13,18 @@ Statuses:
     blocked   recent runs raised (anti-bot, login wall, network)
     idle      never crawled, or not crawled recently enough to judge
     new       has history but too little to compare against
+    disabled  turned off in config.yaml -- old run history is not evidence of
+              anything current, and is never going to be superseded by a
+              fresh run to prove otherwise
 
 "broken" is deliberately distinguished from "idle": a site that has *never* worked
 is a setup problem, while one that worked last week and yields zero today is a
-regression, and they need different responses.
+regression, and they need different responses. "disabled" is deliberately
+distinguished from both: a site turned off on purpose (see e.g. tomtop in
+config.yaml) would otherwise show whatever its last run happened to record --
+usually "blocked", forever, since a disabled site never gets a new run to
+clear it -- which reads as an open problem needing attention when there is
+none.
 """
 
 from __future__ import annotations
@@ -28,6 +36,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .config import load_crawl_config
 from .db.models import CrawlRun, Offer, Site
 
 RECENT_RUNS = 5
@@ -66,10 +75,17 @@ def adapter_health(session: Session) -> list[SiteHealth]:
             .group_by(Offer.site_id)
         ).all()
     )
+    cfg = load_crawl_config()
     now = dt.datetime.now(dt.timezone.utc)
     out: list[SiteHealth] = []
 
     for site in session.scalars(select(Site).order_by(Site.name)).all():
+        active = int(offer_counts.get(site.id, 0) or 0)
+        if not cfg.site(site.key).get("enabled", True):
+            out.append(SiteHealth(site.key, site.name, "disabled", 0, 0.0, 0.0, 0,
+                                  None, active, "turned off in config.yaml"))
+            continue
+
         runs = session.scalars(
             select(CrawlRun)
             .where(CrawlRun.site_key == site.key, CrawlRun.finished_at.is_not(None))
@@ -79,7 +95,6 @@ def adapter_health(session: Session) -> list[SiteHealth]:
             .limit(BASELINE_RUNS)
         ).all()
 
-        active = int(offer_counts.get(site.id, 0) or 0)
         if not runs:
             out.append(SiteHealth(site.key, site.name, "idle", 0, 0.0, 0.0, 0,
                                   None, active, "never crawled"))
@@ -130,6 +145,6 @@ def health_summary(session: Session) -> dict:
         "attention": [r for r in rows if r.needs_attention],
         "counts": {
             s: sum(1 for r in rows if r.status == s)
-            for s in ("ok", "degraded", "broken", "blocked", "idle", "new")
+            for s in ("ok", "degraded", "broken", "blocked", "idle", "new", "disabled")
         },
     }
