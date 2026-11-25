@@ -17,8 +17,8 @@ python-multipart>=0.0.9
 httpx[http2]>=0.27
 truststore>=0.9         # trust the OS cert store (antivirus HTTPS scanning)
 curl_cffi>=0.7          # TLS/JA3 impersonation - needed for AliExpress/DHgate/Banggood
-selectolax>=0.3.21      # fast CSS-selector HTML parsing
-playwright>=1.44        # browser driver for Taobao/Tmall/1688 (run: playwright install chromium)
+selectolax>=0.3.21,<0.4  # 0.4+ dropped the Modest backend this code uses
+playwright==1.62.0      # must match the base image tag in the Dockerfile
 
 # --- media / matching ---
 Pillow>=10.3
