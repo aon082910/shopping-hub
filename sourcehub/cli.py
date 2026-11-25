@@ -311,6 +311,7 @@ def cmd_image_search(args) -> int:
     import pathlib
 
     from .pipeline.imagesearch import UndecodableImage, find_by_bytes, find_by_url
+    from .util.ssrf import UnsafeURL
 
     with session_scope() as session:
         try:
@@ -319,7 +320,7 @@ def cmd_image_search(args) -> int:
             else:
                 data = pathlib.Path(args.target).read_bytes()
                 hits = find_by_bytes(session, data, limit=args.limit)
-        except UndecodableImage as e:
+        except (UndecodableImage, UnsafeURL) as e:
             print(f"ERROR: {e}")
             return 1
         except FileNotFoundError:

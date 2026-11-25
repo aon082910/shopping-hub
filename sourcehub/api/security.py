@@ -51,7 +51,10 @@ def require_admin(
     token = admin_token()
 
     if not token:
-        if _is_loopback(request):
+        # A reverse proxy on the same machine makes every request look like loopback. A forwarding
+        # header means the request came through one, so it is not trusted as local.
+        proxied = any(h in request.headers for h in ("x-forwarded-for", "x-real-ip", "forwarded"))
+        if _is_loopback(request) and not proxied:
             return
         # In a container the client is *never* loopback -- requests arrive from the
         # Docker bridge -- so this fires on every containerised deployment by

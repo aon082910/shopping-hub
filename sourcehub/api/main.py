@@ -747,6 +747,7 @@ async def image_search(
     reseller, so an identical hash usually means an identical product.
     """
     from ..pipeline.imagesearch import UndecodableImage, find_by_bytes, find_by_url
+    from ..util.ssrf import UnsafeURL
 
     hits, error = None, None
     try:
@@ -762,11 +763,11 @@ async def image_search(
             hits = find_by_url(session, image_url.strip())
         else:
             error = "Choose a file or paste an image URL."
-    except UndecodableImage as e:
+    except (UndecodableImage, UnsafeURL) as e:
         error = str(e)
     except Exception as e:
         log.warning("image search failed: %s", e)
-        error = f"Could not search that image: {e}"
+        error = "Could not search that image."
 
     return templates.TemplateResponse(
         request, "image_search.html",
@@ -796,15 +797,19 @@ async def api_image_search(
     session: Session = Depends(db),
 ):
     from ..pipeline.imagesearch import UndecodableImage, find_by_bytes, find_by_url
+    from ..util.ssrf import UnsafeURL
 
     try:
         if file is not None and file.filename:
-            hits = find_by_bytes(session, await file.read())
+            data = await file.read()
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise HTTPException(413, "image is too large")
+            hits = find_by_bytes(session, data)
         elif image_url.strip():
             hits = find_by_url(session, image_url.strip())
         else:
             raise HTTPException(400, "provide a file or image_url")
-    except UndecodableImage as e:
+    except (UndecodableImage, UnsafeURL) as e:
         raise HTTPException(400, str(e)) from e
 
     return {
@@ -902,10 +907,23 @@ def api_bom(payload: dict, session: Session = Depends(db)):
     """JSON BOM costing. Accepts {"lines": "...text..."} or {"items": [[q, n], ...]}."""
     from ..pipeline.export import parse_bom, price_bom
 
-    if "lines" in payload:
-        entries = parse_bom(str(payload["lines"]))
-    else:
-        entries = [(str(q), int(n)) for q, n in (payload.get("items") or [])]
+    try:
+        if "lines" in payload:
+            text = str(payload["lines"])
+            if len(text) > 100_000:
+                raise HTTPException(413, "BOM text is too large")
+            entries = parse_bom(text)
+        else:
+            raw_items = payload.get("items") or []
+            if not isinstance(raw_items, list):
+                raise ValueError("items must be a list")
+            entries = [(str(q), int(n)) for q, n in raw_items]
+    except HTTPException:
+        raise
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "items must be [[query, quantity], ...] with whole-number quantities") from e
+    if len(entries) > 500:
+        raise HTTPException(413, "at most 500 BOM lines")
     result = price_bom(session, entries, direct_only=bool(payload.get("direct_only")))
     return {
         "total_usd": result.total_usd,

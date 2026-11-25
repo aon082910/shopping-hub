@@ -189,10 +189,7 @@ def find_by_bytes(session: Session, data: bytes, **kwargs) -> list[ImageHit]:
 
 
 def find_by_url(session: Session, url: str, **kwargs) -> list[ImageHit]:
-    from ..util.http import Fetcher
+    # User-supplied URL: fetched through the SSRF guard, never the scraper Fetcher.
+    from ..util.ssrf import fetch_public_image
 
-    fetcher = Fetcher(delay=0.2, retries=2, timeout=30)
-    try:
-        return find_by_bytes(session, fetcher.download(url), **kwargs)
-    finally:
-        fetcher.close()
+    return find_by_bytes(session, fetch_public_image(url), **kwargs)
