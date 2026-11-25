@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     sourcehub_media_dir: str = str(ROOT / "data" / "media")
 
     # translation
+    # TRANSLATE_PROVIDER: claude, openai, deepl, google_free or none.
+    # "openai" = any OpenAI-compatible gateway, e.g. OmniRoute on the Raspberry Pi:
+    # LLM_BASE_URL=http://192.168.1.5:20128/v1, LLM_MODEL=apps-default (the OmniRoute
+    # combo for apps), LLM_API_KEY=<OmniRoute key>.
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "apps-default"
     translate_provider: str = "none"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"

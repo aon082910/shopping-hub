@@ -237,7 +237,8 @@ None of these are required to boot; the app skips whatever capability is missing
 
 | Variable | Effect if unset |
 |---|---|
-| `TRANSLATE_PROVIDER` + `ANTHROPIC_API_KEY` | Chinese listings are not translated, so they cannot be title-matched and mostly stay on their own product pages. `claude`, `deepl`, `google_free` or `none` |
+| `TRANSLATE_PROVIDER` + `ANTHROPIC_API_KEY` | Chinese listings are not translated, so they cannot be title-matched and mostly stay on their own product pages. `claude`, `openai`, `deepl`, `google_free` or `none` |
+| `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | Used when `TRANSLATE_PROVIDER=openai`: any OpenAI-compatible gateway, for example OmniRoute at `http://<host>:20128/v1` with model `apps-default`. `LLM_API_KEY` can stay blank if the gateway needs none |
 | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` | eBay falls back to browser scraping -- works, just slower. Free keys at developer.ebay.com |
 | `SOURCEHUB_PROXY` | Crawls come from your home IP. Fine for light use; a residential proxy is strongly recommended for sustained crawling. One URL, or several comma-separated for round-robin |
 | `CN_PROVIDER_KEY` | Taobao / Tmall / 1688 stay unavailable without a browser login. See below |

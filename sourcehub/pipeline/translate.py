@@ -205,6 +205,8 @@ class Translator:
     def _call_provider(self, texts: list[str], src_lang: str | None) -> list[str]:
         if self.provider == "claude":
             return self._claude(texts)
+        if self.provider == "openai":
+            return self._openai(texts)
         if self.provider == "deepl":
             return self._deepl(texts, src_lang)
         if self.provider == "google_free":
@@ -226,6 +228,33 @@ class Translator:
             messages=[{"role": "user", "content": json.dumps(texts, ensure_ascii=False)}],
         )
         body = "".join(block.text for block in msg.content if block.type == "text")
+        return _parse_json_array(body, len(texts), texts)
+
+    def _openai(self, texts: list[str]) -> list[str]:
+        """OpenAI-compatible gateway such as OmniRoute (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)."""
+        import httpx
+
+        base_url = (self.settings.llm_base_url or "").rstrip("/")
+        if not base_url:
+            raise RuntimeError("TRANSLATE_PROVIDER=openai but LLM_BASE_URL is unset")
+        headers = (
+            {"Authorization": f"Bearer {self.settings.llm_api_key}"} if self.settings.llm_api_key else {}
+        )
+        resp = httpx.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json={
+                "model": self.settings.llm_model,
+                "max_tokens": 8000,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps(texts, ensure_ascii=False)},
+                ],
+            },
+            timeout=180,
+        )
+        resp.raise_for_status()
+        body = resp.json()["choices"][0]["message"]["content"] or ""
         return _parse_json_array(body, len(texts), texts)
 
     def _deepl(self, texts: list[str], src_lang: str | None) -> list[str]:
